@@ -18,7 +18,8 @@ FROM python:3.12-slim AS runtime
 WORKDIR /app
 
 # Runtime system deps only (no build tools)
-# Package names are for Debian Bookworm (python:3.12-slim base)
+# Package names for Debian Bookworm (python:3.12-slim)
+# NOTE: libgdk-pixbuf was renamed from 2.0-0 to -2.0-0 in Bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
