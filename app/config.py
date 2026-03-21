@@ -93,8 +93,13 @@ class ProductionConfig(Config):
 class TestingConfig(Config):
     TESTING = True
     SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
+    RATELIMIT_ENABLED = False
     RATELIMIT_STORAGE_URI = 'memory://'
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_pre_ping': True,
+    }
     LOG_FORMAT = 'text'
+    METRICS_ENABLED = False
 
 
 config = {

@@ -2,8 +2,6 @@
 
 from datetime import datetime, timezone
 from app.extensions import db
-from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
-from sqlalchemy import String, Text
 
 
 class Schedule(db.Model):

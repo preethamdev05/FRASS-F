@@ -129,7 +129,7 @@ def login():
 
     # Check model-level lockout (DB-backed)
     if user.is_locked():
-        from datetime import timezone
+        from datetime import datetime, timezone
         remaining = int((user.locked_until - datetime.now(timezone.utc)).total_seconds())
         return jsonify(error=f'Account locked. Try again in {max(remaining, 1)} seconds.'), 429
 

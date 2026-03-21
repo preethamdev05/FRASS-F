@@ -54,7 +54,7 @@ def _setup_metrics(app):
             'fras_requests_total', 'Total HTTP requests',
             ['method', 'endpoint', 'status'],
         )
-        request_duration = Histogram(
+        Histogram(
             'fras_request_duration_seconds', 'Request duration in seconds',
             ['method', 'endpoint'],
         )

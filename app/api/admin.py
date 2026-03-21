@@ -79,7 +79,7 @@ def audit_log():
         total=total,
         page=page,
         per_page=per_page,
-        entries=[l.to_dict() for l in logs],
+        entries=[entry.to_dict() for entry in logs],
     )
 
 

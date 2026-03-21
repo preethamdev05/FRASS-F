@@ -149,9 +149,7 @@ def mark_manual(student_db_id: int, notes: str = None) -> dict:
 
 
 def _compute_status(schedule: Schedule, marked_time: datetime) -> str:
-    """Compute attendance status based on schedule."""
-    now_time = marked_time.time()
-
+    """Compute attendance status based schedule."""
     # Parse schedule start time
     try:
         parts = schedule.start_time.split(':')

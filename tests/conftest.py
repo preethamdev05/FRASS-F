@@ -15,35 +15,38 @@ def app():
         _db.drop_all()
 
 
-@pytest.fixture(scope='function')
-def db(app):
-    """Database fixture."""
+@pytest.fixture(autouse=True)
+def clean_db(app):
+    """Clean database between tests."""
     with app.app_context():
-        _db.create_all()
-        yield _db
-        _db.session.rollback()
-        _db.drop_all()
+        for table in reversed(_db.metadata.sorted_tables):
+            _db.session.execute(table.delete())
+        _db.session.commit()
+    yield
 
 
 @pytest.fixture
 def client(app):
-    """Test client."""
+    """Fresh test client per test."""
     return app.test_client()
 
 
 @pytest.fixture
-def admin_token(client):
-    """Get admin JWT token."""
+def auth_client(app):
+    """Authenticated test client with fresh session."""
     from app.models.user import User
     from app.extensions import db
 
-    with client.application.app_context():
-        user = User(username='testadmin', role='admin')
-        user.set_password('testpass')
-        db.session.add(user)
-        db.session.commit()
+    with app.app_context():
+        user = User.query.filter_by(username='testadmin').first()
+        if not user:
+            user = User(username='testadmin', role='admin')
+            user.set_password('testpass')
+            db.session.add(user)
+            db.session.commit()
 
-    resp = client.post('/api/auth/login', json={
+    c = app.test_client()
+    c.post('/api/auth/login', json={
         'username': 'testadmin', 'password': 'testpass'
     })
-    return resp.json['access_token']
+    return c

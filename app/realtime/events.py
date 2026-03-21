@@ -1,7 +1,7 @@
 """WebSocket event handlers and broadcast helpers."""
 
 import logging
-from flask_socketio import emit, join_room, leave_room
+from flask_socketio import join_room, leave_room
 from app.extensions import socketio
 
 logger = logging.getLogger(__name__)

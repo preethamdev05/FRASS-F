@@ -3,13 +3,13 @@
 import base64
 import concurrent.futures
 import numpy as np
-from datetime import date, datetime, timezone, timedelta
+from datetime import date
 
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from app.extensions import db, limiter
+from app.extensions import limiter
 from app.models.student import Student
-from app.models.attendance import AttendanceRecord, AttendanceSession
+from app.models.attendance import AttendanceRecord
 from app.auth.decorators import role_required
 from app.services import attendance as svc
 

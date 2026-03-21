@@ -303,7 +303,6 @@ class LivenessDetector:
             if face_roi is None or face_roi.size == 0:
                 return 0.5
 
-            import cv2
             gray = self._to_gray(face_roi)
             if gray is None:
                 return 0.5

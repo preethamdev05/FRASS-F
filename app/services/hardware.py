@@ -2,7 +2,6 @@
 
 import logging
 import platform
-import struct
 import os
 
 logger = logging.getLogger(__name__)
@@ -76,7 +75,7 @@ class HardwareProfile:
             self.gpu_type = 'intel_igpu'
             self.gpu_name = 'Intel Integrated'
             self.gpu_vram_gb = 1.5
-            logger.info(f'GPU detected: Intel iGPU (OpenVINO)')
+            logger.info('GPU detected: Intel iGPU (OpenVINO)')
             return
 
         # 4. Check for AMD ROCm (Linux)
@@ -84,7 +83,7 @@ class HardwareProfile:
             self.gpu_type = 'amd_rocm'
             self.gpu_name = 'AMD GPU (ROCm)'
             self.gpu_vram_gb = 4.0
-            logger.info(f'GPU detected: AMD ROCm')
+            logger.info('GPU detected: AMD ROCm')
             return
 
         # 5. Fallback: CPU
