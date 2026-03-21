@@ -3,6 +3,7 @@
 {% block page_title %}Live Attendance{% endblock %}
 
 {% block top_actions %}
+<span class="ws-status" id="ws-status" title="WebSocket status">Connecting...</span>
 <span class="status-badge" id="mode-badge"><i class="fas fa-circle"></i> Inactive</span>
 {% endblock %}
 
@@ -13,6 +14,9 @@
             <div class="card-header">
                 <h2><i class="fas fa-video"></i> Camera Feed</h2>
                 <div class="camera-controls">
+                    <select id="camera-select" style="padding:4px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:0.82rem;margin-right:8px;">
+                        <option value="">Default Camera</option>
+                    </select>
                     <label>Tolerance: <input type="range" id="tolerance" min="0.3" max="0.7" step="0.05" value="0.5"><span id="tol-val">0.5</span></label>
                     <select id="schedule-select" style="padding:4px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:0.82rem;">
                         <option value="">No schedule</option>
@@ -22,10 +26,12 @@
             <div class="card-body">
                 <div class="video-container" id="video-container">
                     <video id="video-feed" autoplay playsinline muted style="display:none;width:100%;border-radius:8px;"></video>
+                    <canvas id="overlay-canvas" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;border-radius:8px;"></canvas>
                     <div class="video-placeholder" id="video-placeholder"><i class="fas fa-video-slash"></i><p>Camera not active</p></div>
                     <div class="session-timer" id="session-timer" style="display:none;"><i class="fas fa-stopwatch"></i><span id="timer-display">0:00</span></div>
                     <div class="scanning-indicator" id="scanning-indicator" style="display:none;"><span class="dot"></span>Scanning...</div>
                 </div>
+                <div id="quality-indicator" style="display:none;padding:6px 12px;border-radius:6px;font-size:0.82rem;margin-top:8px;"></div>
                 <canvas id="capture-canvas" style="display:none;"></canvas>
                 <div class="attendance-controls">
                     <button class="btn btn-success btn-lg" id="start-btn" onclick="startAttendance()"><i class="fas fa-play"></i> Start</button>
@@ -51,13 +57,28 @@
 {% block scripts %}
 <script>
 let isActive = false, scanTimer = null, sessionTimerInt = null, sessionSecs = 0, mediaStream = null;
+let qualityInterval = null;
+
 document.getElementById('tolerance').addEventListener('input', e => { document.getElementById('tol-val').textContent = e.target.value; });
 
+// Enumerate cameras
 document.addEventListener('DOMContentLoaded', async () => {
     try {
         const schedules = await apiFetch('/api/schedules');
         const sel = document.getElementById('schedule-select');
         schedules.forEach(s => { const o = document.createElement('option'); o.value = s.id; o.textContent = s.name; sel.appendChild(o); });
+    } catch(e) {}
+
+    try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(d => d.kind === 'videoinput');
+        const camSel = document.getElementById('camera-select');
+        videoDevices.forEach((d, i) => {
+            const o = document.createElement('option');
+            o.value = d.deviceId;
+            o.textContent = d.label || `Camera ${i + 1}`;
+            camSel.appendChild(o);
+        });
     } catch(e) {}
 });
 
@@ -68,13 +89,69 @@ function startTimer() {
 }
 function stopTimer() { clearInterval(sessionTimerInt); document.getElementById('session-timer').style.display = 'none'; }
 
+// Real-time quality check on camera feed
+function startQualityMonitor() {
+    const video = document.getElementById('video-feed');
+    const qi = document.getElementById('quality-indicator');
+    qi.style.display = 'block';
+
+    qualityInterval = setInterval(() => {
+        if (!video.srcObject || video.readyState < 2) return;
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0);
+
+        // Simple client-side quality heuristics
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const pixels = imgData.data;
+        let totalBrightness = 0;
+        let totalPixels = pixels.length / 4;
+
+        for (let i = 0; i < pixels.length; i += 16) { // Sample every 4th pixel for speed
+            totalBrightness += (pixels[i] * 0.299 + pixels[i+1] * 0.587 + pixels[i+2] * 0.114);
+        }
+        const avgBrightness = totalBrightness / (totalPixels / 4);
+
+        let status, color;
+        if (avgBrightness < 40) {
+            status = 'Too dark — increase lighting';
+            color = '#ff4444';
+        } else if (avgBrightness > 220) {
+            status = 'Too bright — reduce lighting';
+            color = '#ff4444';
+        } else if (canvas.width < 320) {
+            status = 'Low resolution — move closer';
+            color = '#ffaa00';
+        } else {
+            status = 'Quality OK';
+            color = '#00cc44';
+        }
+        qi.style.background = color + '22';
+        qi.style.color = color;
+        qi.style.border = `1px solid ${color}44`;
+        qi.innerHTML = `<i class="fas fa-${avgBrightness < 40 ? 'moon' : avgBrightness > 220 ? 'sun' : 'check-circle'}"></i> ${status} (${Math.round(avgBrightness)} brightness, ${canvas.width}x${canvas.height})`;
+    }, 1500);
+}
+
+function stopQualityMonitor() {
+    clearInterval(qualityInterval);
+    document.getElementById('quality-indicator').style.display = 'none';
+}
+
 async function startCamera() {
     try {
-        mediaStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }, audio: false });
+        const deviceId = document.getElementById('camera-select').value;
+        const constraints = { video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }, audio: false };
+        if (deviceId) constraints.video = { deviceId: { exact: deviceId }, width: { ideal: 640 }, height: { ideal: 480 } };
+
+        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
         const video = document.getElementById('video-feed');
         video.srcObject = mediaStream;
         video.style.display = 'block';
         document.getElementById('video-placeholder').style.display = 'none';
+        startQualityMonitor();
         return true;
     } catch (err) {
         showToast('Camera access denied or unavailable: ' + err.message, 'error');
@@ -83,6 +160,7 @@ async function startCamera() {
 }
 
 function stopCamera() {
+    stopQualityMonitor();
     if (mediaStream) {
         mediaStream.getTracks().forEach(t => t.stop());
         mediaStream = null;
@@ -166,10 +244,12 @@ function scanFrame() {
                         const recogEl = document.getElementById('recognized-list');
                         if (data.recognized.length > 0) {
                             recogEl.innerHTML = data.recognized.map(r => `
-                                <div class="recognized-item ${r.student_id ? 'known' : r.spoof ? 'unknown' : 'unknown'}">
-                                    <i class="fas fa-${r.student_id ? 'user-check' : r.spoof ? 'shield-alt' : 'question-circle'}"></i>
-                                    <span class="name">${escapeHtml(r.name)}${r.spoof ? ' ⚠️' : ''}</span>
-                                    <span class="confidence">${r.confidence}%${r.spoof ? ' L:' + r.liveness_score : ''}</span>
+                                <div class="recognized-item ${r.student_id ? 'known' : r.spoof ? 'spoof' : 'unknown'}">
+                                    <i class="fas fa-${r.student_id ? 'user-check' : r.spoof ? 'shield-alt' : r.quality_reason ? 'exclamation-triangle' : 'question-circle'}"></i>
+                                    <span class="name">${escapeHtml(r.name)}${r.spoof ? ' <span class="spoof-badge">SPOOF</span>' : ''}</span>
+                                    <span class="confidence">${r.confidence}%${r.liveness_score ? ' L:' + r.liveness_score : ''}</span>
+                                    ${r.quality_reason ? '<small class="quality-warn">' + escapeHtml(r.quality_reason) + '</small>' : ''}
+                                    ${r.reason ? '<small class="spoof-reason">' + escapeHtml(r.reason) + '</small>' : ''}
                                 </div>
                             `).join('');
                         }
@@ -178,9 +258,9 @@ function scanFrame() {
                             data.newly_marked.forEach(m => {
                                 const div = document.createElement('div');
                                 div.className = 'marked-item new';
-                                div.innerHTML = `<i class="fas fa-check-circle"></i><div><strong>${escapeHtml(m.name)}</strong><small>${escapeHtml(m.sid)} • ${m.confidence}%</small></div>`;
+                                div.innerHTML = `<i class="fas fa-check-circle"></i><div><strong>${escapeHtml(m.name)}</strong><small>${escapeHtml(m.sid)} &bull; ${m.confidence}%</small></div>`;
                                 markedEl.prepend(div);
-                                showToast(`✓ ${m.name} marked`, 'success');
+                                showToast(`Marked: ${m.name}`, 'success');
                             });
                         }
                         document.getElementById('marked-count').textContent = `${data.total_marked} marked`;
@@ -194,6 +274,14 @@ function scanFrame() {
             reader.readAsDataURL(blob);
         }, 'image/jpeg', 0.8);
     });
+}
+
+// Live stats from WebSocket
+function onStatsUpdate(stats) {
+    if (typeof animateCounter === 'function') {
+        const presentEl = document.getElementById('stat-present');
+        if (presentEl) animateCounter(presentEl, stats.present || 0);
+    }
 }
 </script>
 {% endblock %}

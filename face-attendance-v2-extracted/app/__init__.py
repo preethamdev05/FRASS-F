@@ -2,8 +2,7 @@
 
 import os
 import logging
-from flask import Flask, jsonify
-from flask_cors import CORS
+from flask import Flask
 from dotenv import load_dotenv
 
 from app.config import config
@@ -36,41 +35,6 @@ def create_app(config_name=None):
     jwt.init_app(app)
     socketio.init_app(app)
     limiter.init_app(app)
-
-    # CORS for API endpoints
-    CORS(app, resources={r"/api/*": {
-        "origins": app.config.get('CORS_ORIGINS', ['*']),
-        "supports_credentials": True,
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"],
-    }})
-
-    # Security headers middleware
-    @app.after_request
-    def set_security_headers(response):
-        response.headers['X-Content-Type-Options'] = 'nosniff'
-        response.headers['X-Frame-Options'] = 'DENY'
-        response.headers['X-XSS-Protection'] = '1; mode=block'
-        response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
-        if app.config.get('JWT_COOKIE_SECURE'):
-            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
-        return response
-
-    # Health check endpoint (no auth required — for cloud load balancers)
-    @app.route('/api/health')
-    def health_check():
-        """Cloud health check — verifies DB connectivity."""
-        try:
-            db.session.execute(db.text('SELECT 1'))
-            db_status = 'ok'
-        except Exception as e:
-            db_status = f'error: {str(e)}'
-        status = 'healthy' if db_status == 'ok' else 'degraded'
-        return jsonify(
-            status=status,
-            database=db_status,
-            version='2.0.0',
-        ), 200 if status == 'healthy' else 503
 
     # Import all models so Alembic sees them
     from app.models import user, student, face, attendance, schedule, audit  # noqa: F401

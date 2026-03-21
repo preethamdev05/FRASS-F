@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login — FaceAttend</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+<body style="justify-content:center;align-items:center;">
+    <div class="login-container">
+        <div class="login-card">
+            <div class="login-header">
+                <i class="fas fa-user-check" style="font-size:2.5rem;background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;"></i>
+                <h1>FaceAttend</h1>
+                <p>Sign in to your account</p>
+            </div>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" placeholder="Enter username" required autofocus>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" placeholder="Enter password" required>
+                </div>
+                <button type="submit" class="btn btn-primary btn-block" id="login-btn">
+                    <i class="fas fa-sign-in-alt"></i> Sign In
+                </button>
+            </form>
+            <div id="login-error" class="login-error" style="display:none;"></div>
+            <div class="login-footer">
+                <small>Default: admin / admin123</small>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // Redirect if already logged in
+    const token = localStorage.getItem('access_token');
+    if (token) {
+        fetch('/api/auth/me', { headers: { 'Authorization': 'Bearer ' + token } })
+            .then(r => { if (r.ok) window.location.href = '/dashboard'; })
+            .catch(() => {});
+    }
+
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('login-btn');
+        const errEl = document.getElementById('login-error');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> Signing in...';
+        errEl.style.display = 'none';
+
+        try {
+            const res = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    username: document.getElementById('username').value.trim(),
+                    password: document.getElementById('password').value,
+                })
+            });
+            const data = await res.json();
+
+            if (!res.ok) {
+                errEl.textContent = data.error || 'Login failed';
+                errEl.style.display = 'block';
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Sign In';
+                return;
+            }
+
+            localStorage.setItem('access_token', data.access_token);
+            localStorage.setItem('refresh_token', data.refresh_token);
+            localStorage.setItem('user', JSON.stringify(data.user));
+            window.location.href = '/dashboard';
+        } catch (e) {
+            errEl.textContent = 'Network error';
+            errEl.style.display = 'block';
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Sign In';
+        }
+    });
+    </script>
+
+    <style>
+    .login-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        padding: 20px;
+    }
+    .login-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 40px;
+        width: 100%;
+        max-width: 400px;
+        backdrop-filter: blur(12px);
+        box-shadow: var(--shadow-md);
+    }
+    .login-header {
+        text-align: center;
+        margin-bottom: 28px;
+    }
+    .login-header h1 {
+        font-size: 1.5rem;
+        margin-top: 12px;
+        letter-spacing: -0.5px;
+    }
+    .login-header p {
+        color: var(--text-secondary);
+        font-size: 0.88rem;
+        margin-top: 4px;
+    }
+    .login-error {
+        background: var(--danger-glow);
+        color: var(--danger);
+        padding: 10px 14px;
+        border-radius: var(--radius-sm);
+        margin-top: 16px;
+        font-size: 0.88rem;
+        text-align: center;
+    }
+    .login-footer {
+        text-align: center;
+        margin-top: 20px;
+        color: var(--text-muted);
+        font-size: 0.8rem;
+    }
+    </style>
+</body>
+</html>

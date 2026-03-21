@@ -1,0 +1,7 @@
+attendance.db
+.secret
+__pycache__/
+*.pyc
+face_data/
+attendance_logs/
+venv/

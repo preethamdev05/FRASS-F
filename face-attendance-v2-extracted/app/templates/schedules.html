@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Schedules{% endblock %}
+{% block page_title %}Schedules{% endblock %}
+{% block top_actions %}<button class="btn btn-primary" onclick="openAddModal()"><i class="fas fa-plus"></i> Add Schedule</button>{% endblock %}
+
+{% block content %}
+<div class="schedule-grid" id="schedule-grid"><div class="loading"><span class="spinner"></span>Loading...</div></div>
+
+<div class="modal" id="schedule-modal" style="display:none;">
+    <div class="modal-backdrop" onclick="closeModal()"></div>
+    <div class="modal-content">
+        <div class="modal-header"><h2 id="modal-title">Add Schedule</h2><button class="btn-close" onclick="closeModal()">&times;</button></div>
+        <div class="modal-body">
+            <form id="schedule-form">
+                <input type="hidden" id="edit-id">
+                <div class="form-group"><label>Name</label><input type="text" id="s-name" placeholder="e.g. Morning Class" required></div>
+                <div class="form-group"><label>Department (optional)</label><input type="text" id="s-dept" placeholder="Computer Science"></div>
+                <div class="form-row">
+                    <div class="form-group"><label>Start Time</label><input type="time" id="s-start" required></div>
+                    <div class="form-group"><label>End Time</label><input type="time" id="s-end" required></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Late Threshold (min)</label><input type="number" id="s-late" value="10" min="0" max="60"></div>
+                    <div class="form-group"><label>Grace Period (min)</label><input type="number" id="s-grace" value="5" min="0" max="30"></div>
+                </div>
+                <div class="form-group"><label>Days</label>
+                    <div style="display:flex;gap:6px;margin-top:4px;">
+                        <label style="display:flex;align-items:center;gap:4px;font-size:0.85rem;"><input type="checkbox" class="day-cb" value="0"> Mon</label>
+                        <label style="display:flex;align-items:center;gap:4px;font-size:0.85rem;"><input type="checkbox" class="day-cb" value="1"> Tue</label>
+                        <label style="display:flex;align-items:center;gap:4px;font-size:0.85rem;"><input type="checkbox" class="day-cb" value="2"> Wed</label>
+                        <label style="display:flex;align-items:center;gap:4px;font-size:0.85rem;"><input type="checkbox" class="day-cb" value="3"> Thu</label>
+                        <label style="display:flex;align-items:center;gap:4px;font-size:0.85rem;"><input type="checkbox" class="day-cb" value="4"> Fri</label>
+                        <label style="display:flex;align-items:center;gap:4px;font-size:0.85rem;"><input type="checkbox" class="day-cb" value="5"> Sat</label>
+                        <label style="display:flex;align-items:center;gap:4px;font-size:0.85rem;"><input type="checkbox" class="day-cb" value="6"> Sun</label>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Save Schedule</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+let allSchedules = [];
+
+document.addEventListener('DOMContentLoaded', loadSchedules);
+
+async function loadSchedules() {
+    try {
+        allSchedules = await apiFetch('/api/schedules');
+        const grid = document.getElementById('schedule-grid');
+        if (!allSchedules.length) { grid.innerHTML = '<div class="empty-state"><i class="fas fa-calendar-alt"></i><p>No schedules yet</p></div>'; return; }
+        grid.innerHTML = allSchedules.map(s => `
+            <div class="schedule-card">
+                <h3><i class="fas fa-clock" style="color:var(--accent)"></i> ${escapeHtml(s.name)}</h3>
+                <div class="time-display">${s.start_time} — ${s.end_time}</div>
+                <div class="days-display">${DAYS.map((d,i) => `<span class="day-chip ${s.days_of_week.includes(i)?'active':''}">${d[0]}</span>`).join('')}</div>
+                <div class="schedule-meta">
+                    <span><i class="fas fa-hourglass-half"></i> Late: ${s.late_threshold}m</span>
+                    <span><i class="fas fa-shield-alt"></i> Grace: ${s.grace_period}m</span>
+                    ${s.department ? `<span><i class="fas fa-building"></i> ${escapeHtml(s.department)}</span>` : ''}
+                </div>
+                <div class="schedule-actions">
+                    <button class="btn btn-sm btn-outline" onclick="editSchedule(${s.id})"><i class="fas fa-edit"></i> Edit</button>
+                    <button class="btn btn-sm btn-outline btn-danger-outline" onclick="deleteSchedule(${s.id},'${escapeHtml(s.name)}')"><i class="fas fa-trash"></i></button>
+                </div>
+            </div>
+        `).join('');
+    } catch(e) { showToast('Load failed','error'); }
+}
+
+function openAddModal() {
+    document.getElementById('edit-id').value = '';
+    document.getElementById('modal-title').textContent = 'Add Schedule';
+    document.getElementById('schedule-form').reset();
+    document.querySelectorAll('.day-cb').forEach(cb => cb.checked = false);
+    document.getElementById('schedule-modal').style.display = 'flex';
+}
+
+function editSchedule(id) {
+    const s = allSchedules.find(x=>x.id===id); if (!s) return;
+    document.getElementById('edit-id').value = id;
+    document.getElementById('modal-title').textContent = 'Edit Schedule';
+    document.getElementById('s-name').value = s.name;
+    document.getElementById('s-dept').value = s.department||'';
+    document.getElementById('s-start').value = s.start_time;
+    document.getElementById('s-end').value = s.end_time;
+    document.getElementById('s-late').value = s.late_threshold;
+    document.getElementById('s-grace').value = s.grace_period;
+    document.querySelectorAll('.day-cb').forEach(cb => { cb.checked = s.days_of_week.includes(parseInt(cb.value)); });
+    document.getElementById('schedule-modal').style.display = 'flex';
+}
+
+function closeModal() { document.getElementById('schedule-modal').style.display = 'none'; }
+
+document.getElementById('schedule-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const id = document.getElementById('edit-id').value;
+    const days = Array.from(document.querySelectorAll('.day-cb:checked')).map(cb => parseInt(cb.value));
+    const body = {
+        name: document.getElementById('s-name').value.trim(),
+        department: document.getElementById('s-dept').value.trim()||null,
+        start_time: document.getElementById('s-start').value,
+        end_time: document.getElementById('s-end').value,
+        late_threshold: parseInt(document.getElementById('s-late').value),
+        grace_period: parseInt(document.getElementById('s-grace').value),
+        days_of_week: days,
+    };
+    try {
+        if (id) await apiFetch(`/api/schedules/${id}`, {method:'PUT', body});
+        else await apiFetch('/api/schedules', {method:'POST', body});
+        showToast('Schedule saved','success'); closeModal(); loadSchedules();
+    } catch(e) { showToast(e.message,'error'); }
+});
+
+async function deleteSchedule(id, name) {
+    if (!confirm(`Delete "${name}"?`)) return;
+    try { await apiFetch(`/api/schedules/${id}`, {method:'DELETE'}); showToast('Deleted','success'); loadSchedules(); }
+    catch(e) { showToast(e.message,'error'); }
+}
+</script>
+{% endblock %}

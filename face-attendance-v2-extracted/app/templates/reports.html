@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Reports{% endblock %}
+{% block page_title %}Reports{% endblock %}
+{% block top_actions %}
+<button class="btn btn-primary" onclick="exportPDF()"><i class="fas fa-file-pdf"></i> PDF</button>
+<button class="btn btn-secondary" onclick="exportCSV()"><i class="fas fa-download"></i> CSV</button>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header"><h2><i class="fas fa-filter"></i> Filters</h2></div>
+    <div class="card-body">
+        <div class="form-row">
+            <div class="form-group"><label>Start</label><input type="date" id="start-date"></div>
+            <div class="form-group"><label>End</label><input type="date" id="end-date"></div>
+            <div class="form-group"><label>Student</label><select id="student-filter"><option value="">All</option></select></div>
+            <div class="form-group form-group-btn"><label>&nbsp;</label><button class="btn btn-primary" onclick="loadReports()"><i class="fas fa-search"></i> Load</button></div>
+        </div>
+    </div>
+</div>
+
+<div class="summary-stats" id="summary-stats" style="display:none;">
+    <div class="summary-stat"><div class="value" id="s-total">0</div><div class="label">Records</div></div>
+    <div class="summary-stat"><div class="value" id="s-present">0</div><div class="label">Present</div></div>
+    <div class="summary-stat"><div class="value" id="s-late">0</div><div class="label">Late</div></div>
+    <div class="summary-stat"><div class="value" id="s-rate">0%</div><div class="label">Rate</div></div>
+</div>
+
+<div class="card">
+    <div class="card-header"><h2><i class="fas fa-table"></i> Records</h2><span id="record-count" class="badge badge-secondary">0</span></div>
+    <div class="card-body">
+        <table class="data-table">
+            <thead><tr><th>Date</th><th>Student ID</th><th>Name</th><th>Dept</th><th>In</th><th>Out</th><th>Status</th><th>Conf.</th><th>Method</th></tr></thead>
+            <tbody id="reports-tbody"><tr><td colspan="9" class="empty">Select filters and Load</td></tr></tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const today = new Date().toISOString().split('T')[0];
+const weekAgo = new Date(Date.now()-7*864e5).toISOString().split('T')[0];
+document.getElementById('start-date').value = weekAgo;
+document.getElementById('end-date').value = today;
+
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        const students = await apiFetch('/api/students');
+        const sel = document.getElementById('student-filter');
+        students.forEach(s => { const o = document.createElement('option'); o.value = s.id; o.textContent = `${s.student_id} - ${s.name}`; sel.appendChild(o); });
+    } catch(e){}
+    loadReports();
+});
+
+async function loadReports() {
+    const start = document.getElementById('start-date').value, end = document.getElementById('end-date').value, sid = document.getElementById('student-filter').value;
+    let url = `/api/attendance/range?start=${start}&end=${end}`;
+    if (sid) url += `&student_id=${sid}`;
+    try {
+        const records = await apiFetch(url);
+        document.getElementById('record-count').textContent = `${records.length} records`;
+        const se = document.getElementById('summary-stats');
+        if (records.length) {
+            se.style.display = 'grid';
+            const p = records.filter(r=>r.status==='present').length, l = records.filter(r=>r.status==='late').length;
+            animateCounter(document.getElementById('s-total'), records.length);
+            animateCounter(document.getElementById('s-present'), p);
+            animateCounter(document.getElementById('s-late'), l);
+            document.getElementById('s-rate').textContent = ((p+l)/records.length*100).toFixed(1)+'%';
+        } else { se.style.display = 'none'; }
+        const t = document.getElementById('reports-tbody');
+        t.innerHTML = records.length ? records.map(r=>`<tr>
+            <td>${escapeHtml(r.date)}</td><td><code>${escapeHtml(r.sid||'—')}</code></td><td>${escapeHtml(r.name)}</td>
+            <td>${escapeHtml(r.department||'—')}</td><td>${formatTime(r.time_in)}</td><td>${formatTime(r.time_out)}</td>
+            <td><span class="badge badge-${escapeHtml(r.status)}">${escapeHtml(r.status)}</span></td>
+            <td>${r.confidence?r.confidence+'%':'—'}</td><td>${escapeHtml(r.method)}</td>
+        </tr>`).join('') : '<tr><td colspan="9" class="empty">No records</td></tr>';
+    } catch(e) { showToast('Load failed','error'); }
+}
+
+function exportCSV() {
+    const s = document.getElementById('start-date').value, e = document.getElementById('end-date').value;
+    window.location.href = `/api/reports/export/csv?start=${s}&end=${e}`;
+}
+function exportPDF() {
+    const s = document.getElementById('start-date').value, e = document.getElementById('end-date').value;
+    window.location.href = `/api/reports/export/pdf?start=${s}&end=${e}`;
+}
+</script>
+{% endblock %}

@@ -1,11 +1,9 @@
 """Authentication routes."""
 
-import re
-import time
-from flask import Blueprint, request, jsonify, make_response
+from flask import Blueprint, request, jsonify
 from flask_jwt_extended import (
     create_access_token, create_refresh_token, jwt_required,
-    get_jwt_identity, set_access_cookies, set_refresh_cookies
+    get_jwt_identity, get_jwt
 )
 from app.extensions import db, limiter
 from app.models.user import User
@@ -14,52 +12,14 @@ from app.auth.decorators import role_required
 
 auth_bp = Blueprint('auth', __name__)
 
-# Account lockout tracking: {username: [attempt_count, lockout_until]}
-_login_attempts: dict = {}
-MAX_LOGIN_ATTEMPTS = 5
-LOCKOUT_DURATION = 300  # 5 minutes
-
-MIN_PASSWORD_LENGTH = 8
-PASSWORD_PATTERN = re.compile(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).+$')
-
-
-def _check_account_lockout(username: str) -> str | None:
-    """Check if account is locked out. Returns error message or None."""
-    if username in _login_attempts:
-        attempts, lockout_until = _login_attempts[username]
-        if lockout_until and time.time() < lockout_until:
-            remaining = int(lockout_until - time.time())
-            return f'Account locked. Try again in {remaining} seconds.'
-    return None
-
-
-def _record_failed_attempt(username: str):
-    """Record a failed login attempt."""
-    if username not in _login_attempts:
-        _login_attempts[username] = [0, None]
-    _login_attempts[username][0] += 1
-    if _login_attempts[username][0] >= MAX_LOGIN_ATTEMPTS:
-        _login_attempts[username][1] = time.time() + LOCKOUT_DURATION
-
-
-def _clear_attempts(username: str):
-    """Clear failed login attempts on successful login."""
-    _login_attempts.pop(username, None)
-
-
-def _validate_password_strength(password: str) -> str | None:
-    """Validate password strength. Returns error message or None."""
-    if len(password) < MIN_PASSWORD_LENGTH:
-        return f'Password must be at least {MIN_PASSWORD_LENGTH} characters'
-    if not PASSWORD_PATTERN.match(password):
-        return 'Password must contain uppercase, lowercase, and a digit'
-    return None
+# Token blacklist (in-memory for dev, Redis for prod)
+_token_blacklist = set()
 
 
 @auth_bp.route('/login', methods=['POST'])
-@limiter.limit('10/minute')
+@limiter.limit('5/minute')
 def login():
-    """Authenticate user and return JWT tokens via HttpOnly cookies."""
+    """Authenticate user and return JWT tokens."""
     data = request.json
     if not data:
         return jsonify(error='Missing credentials'), 400
@@ -70,21 +30,12 @@ def login():
     if not username or not password:
         return jsonify(error='Username and password required'), 400
 
-    # Check account lockout
-    lockout_msg = _check_account_lockout(username)
-    if lockout_msg:
-        return jsonify(error=lockout_msg), 429
-
     user = User.query.filter_by(username=username).first()
     if not user or not user.check_password(password):
-        _record_failed_attempt(username)
-        remaining_attempts = MAX_LOGIN_ATTEMPTS - _login_attempts.get(username, [0])[0]
-        return jsonify(error=f'Invalid credentials. {remaining_attempts} attempts remaining.'), 401
+        return jsonify(error='Invalid credentials'), 401
 
     if not user.is_active:
         return jsonify(error='Account disabled'), 403
-
-    _clear_attempts(username)
 
     access_token = create_access_token(identity=str(user.id), additional_claims={'role': user.role})
     refresh_token = create_refresh_token(identity=str(user.id))
@@ -95,10 +46,11 @@ def login():
     db.session.add(log)
     db.session.commit()
 
-    resp = make_response(jsonify(user=user.to_dict()))
-    set_access_cookies(resp, access_token)
-    set_refresh_cookies(resp, refresh_token)
-    return resp
+    return jsonify(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        user=user.to_dict(),
+    )
 
 
 @auth_bp.route('/refresh', methods=['POST'])
@@ -111,9 +63,7 @@ def refresh():
         return jsonify(error='User not found'), 404
 
     access_token = create_access_token(identity=str(user.id), additional_claims={'role': user.role})
-    resp = make_response(jsonify(status='refreshed'))
-    set_access_cookies(resp, access_token)
-    return resp
+    return jsonify(access_token=access_token)
 
 
 @auth_bp.route('/me', methods=['GET'])
@@ -125,16 +75,6 @@ def me():
     if not user:
         return jsonify(error='User not found'), 404
     return jsonify(user.to_dict())
-
-
-@auth_bp.route('/logout', methods=['POST'])
-@jwt_required()
-def logout():
-    """Clear JWT cookies."""
-    resp = make_response(jsonify(status='logged_out'))
-    resp.delete_cookie('access_token', path='/')
-    resp.delete_cookie('refresh_token', path='/api/auth')
-    return resp
 
 
 @auth_bp.route('/register', methods=['POST'])
@@ -159,10 +99,6 @@ def register():
 
     if User.query.filter_by(username=username).first():
         return jsonify(error='Username already exists'), 409
-
-    pw_error = _validate_password_strength(password)
-    if pw_error:
-        return jsonify(error=pw_error), 400
 
     user = User(username=username, email=email, role=role)
     user.set_password(password)
@@ -193,9 +129,8 @@ def change_password():
     if not user.check_password(old_password):
         return jsonify(error='Current password incorrect'), 400
 
-    pw_error = _validate_password_strength(new_password)
-    if pw_error:
-        return jsonify(error=pw_error), 400
+    if len(new_password) < 6:
+        return jsonify(error='Password must be at least 6 characters'), 400
 
     user.set_password(new_password)
     db.session.commit()
