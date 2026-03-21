@@ -23,5 +23,5 @@ loglevel = os.environ.get('GUNICORN_LOG_LEVEL', 'info')
 # Process naming
 proc_name = 'face-attendance'
 
-# Preload app for faster worker startup
-preload_app = True
+# Do NOT preload with gevent — gevent monkey-patching must happen per worker
+preload_app = False

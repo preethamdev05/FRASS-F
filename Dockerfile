@@ -3,11 +3,12 @@ FROM python:3.12-slim AS builder
 
 WORKDIR /build
 
-# System deps for building
+# System deps for building C extensions (psycopg2, numpy, opencv)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential libpq-dev \
+    build-essential libpq-dev libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Python packages to a prefix
 COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
@@ -20,11 +21,14 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 libglib2.0-0 libgomp1 \
     libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf2.0-0 \
-    libffi-dev libcairo2 libpq5 curl \
+    libcairo2 libpq5 curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy installed Python packages
+# Copy installed Python packages from builder
 COPY --from=builder /install /usr/local
+
+# Verify Python packages are accessible
+RUN python -c "import flask; print('Flask', flask.__version__)"
 
 # App code
 COPY . .

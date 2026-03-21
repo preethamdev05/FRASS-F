@@ -1,20 +1,55 @@
-__pycache__
+# Python
+__pycache__/
 *.pyc
 *.pyo
-.git
+*.egg-info/
+
+# Virtual environments
+venv/
+.venv/
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# Linting
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Git
+.git/
 .gitignore
+
+# Docker
+.dockerignore
+
+# Environment (keep .env.example)
 .env
 .env.*
 !.env.example
-venv/
+
+# Database
 *.db
+instance/
+
+# Data (ephemeral)
 face_data/
-attendance.db
-__pycache__/
-*.egg-info/
-.mypy_cache/
-.pytest_cache/
+attendance_logs/
+
+# Dev artifacts
 node_modules/
+old_static/
+
+# Project docs (not needed at runtime)
 BLUEPRINT.md
 run.bat
-old_static/
+Makefile
+
+# Dev requirements (not needed in production image)
+requirements-dev.txt

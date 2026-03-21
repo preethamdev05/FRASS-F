@@ -62,7 +62,7 @@ jobs:
       - name: Install Python deps
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
       - name: Run tests
         run: pytest tests/ -v --tb=short --cov=app --cov-report=term-missing
       - name: Upload coverage
@@ -87,6 +87,23 @@ jobs:
             -e SECRET_KEY=docker-test-secret \
             -e JWT_SECRET_KEY=docker-test-jwt-secret \
             -p 5000:5000 fras:${{ github.sha }}
-          sleep 10
-          curl -f http://localhost:5000/api/health || exit 1
+
+          # Wait for container to start (gunicorn + worker init can take 15-20s)
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:5000/api/health > /dev/null 2>&1; then
+              echo "Health check passed after ${i}s"
+              curl -s http://localhost:5000/api/health
+              docker logs fras-test
+              docker stop fras-test
+              docker rm fras-test
+              exit 0
+            fi
+            echo "Waiting... (${i}/30)"
+            sleep 2
+          done
+
+          echo "Health check failed after 60s"
+          docker logs fras-test
           docker stop fras-test
+          docker rm fras-test
+          exit 1
