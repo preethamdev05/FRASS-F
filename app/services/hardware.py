@@ -47,52 +47,45 @@ class HardwareProfile:
 
     def _detect_gpu(self):
         """Detect GPU type in priority order."""
-
-        # 1. NVIDIA CUDA
         try:
             import onnxruntime as ort
-            if 'CUDAExecutionProvider' in ort.get_available_providers():
-                self.gpu_type = 'nvidia_cuda'
-                self.gpu_name = self._get_nvidia_name()
-                self.gpu_vram_gb = self._get_nvidia_vram()
-                logger.info(f'GPU detected: NVIDIA {self.gpu_name} ({self.gpu_vram_gb}GB)')
-                return
-        except Exception:
-            pass
+            available = ort.get_available_providers()
+        except ImportError:
+            logger.info('onnxruntime not installed, skipping GPU detection')
+            return
+
+        # 1. NVIDIA CUDA
+        if 'CUDAExecutionProvider' in available:
+            self.gpu_type = 'nvidia_cuda'
+            self.gpu_name = self._get_nvidia_name()
+            self.gpu_vram_gb = self._get_nvidia_vram()
+            logger.info(f'GPU detected: NVIDIA {self.gpu_name} ({self.gpu_vram_gb}GB)')
+            return
 
         # 2. Apple Silicon (Metal/CoreML)
         if self.platform == 'darwin' and self.arch in ('arm64', 'aarch64'):
-            try:
-                import onnxruntime as ort
-                if 'CoreMLExecutionProvider' in ort.get_available_providers():
-                    self.gpu_type = 'apple_metal'
-                    self.gpu_name = 'Apple Silicon'
-                    self.gpu_vram_gb = self.ram_gb * 0.5  # Unified memory
-                    logger.info(f'GPU detected: Apple Silicon (shared {self.gpu_vram_gb}GB)')
-                    return
-            except Exception:
-                pass
+            if 'CoreMLExecutionProvider' in available:
+                self.gpu_type = 'apple_metal'
+                self.gpu_name = 'Apple Silicon'
+                self.gpu_vram_gb = self.ram_gb * 0.5
+                logger.info(f'GPU detected: Apple Silicon (shared {self.gpu_vram_gb}GB)')
+                return
 
         # 3. Intel OpenVINO
-        try:
-            import onnxruntime as ort
-            if 'OpenVINOExecutionProvider' in ort.get_available_providers():
-                self.gpu_type = 'intel_igpu'
-                self.gpu_name = 'Intel Integrated'
-                self.gpu_vram_gb = 1.5  # Typical iGPU shared
-                logger.info(f'GPU detected: Intel iGPU (OpenVINO)')
-                return
-        except Exception:
-            pass
+        if 'OpenVINOExecutionProvider' in available:
+            self.gpu_type = 'intel_igpu'
+            self.gpu_name = 'Intel Integrated'
+            self.gpu_vram_gb = 1.5
+            logger.info(f'GPU detected: Intel iGPU (OpenVINO)')
+            return
 
         # 4. Check for AMD ROCm (Linux)
-        if self.platform == 'linux':
-            if os.path.exists('/opt/rocm'):
-                self.gpu_type = 'amd_rocm'
-                self.gpu_name = 'AMD GPU (ROCm)'
-                self.gpu_vram_gb = 4.0  # Estimated
-                logger.info(f'GPU detected: AMD ROCm')
-                return
+        if self.platform == 'linux' and os.path.exists('/opt/rocm'):
+            self.gpu_type = 'amd_rocm'
+            self.gpu_name = 'AMD GPU (ROCm)'
+            self.gpu_vram_gb = 4.0
+            logger.info(f'GPU detected: AMD ROCm')
+            return
 
         # 5. Fallback: CPU
         logger.info(f'No GPU detected, using CPU ({self.cpu_cores} cores, {self.ram_gb}GB RAM)')

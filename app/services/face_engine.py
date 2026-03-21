@@ -30,8 +30,14 @@ class FaceEngine:
 
     def _load_model(self):
         """Load InsightFace with optimal providers."""
-        import insightface
-        from insightface.app import FaceAnalysis
+        try:
+            from insightface.app import FaceAnalysis
+        except ImportError:
+            logger.error('insightface not installed. Run: pip install insightface onnxruntime')
+            raise RuntimeError(
+                'insightface is required for face recognition. '
+                'Install with: pip install insightface onnxruntime'
+            )
 
         providers = self.config.get('providers', ['CPUExecutionProvider'])
         det_size = self.config.get('face_det_size', 640)
