@@ -1,44 +1,36 @@
-# Product Context: Next.js Starter Template
+# Product Context: Xiaomi-FRAS (Face Recognition Attendance System)
 
-## Why This Template Exists
+## Why This Project Exists
 
-Starting a new Next.js project involves boilerplate setup, configuration decisions, and establishing patterns. This template provides a clean, opinionated starting point that eliminates setup friction and establishes best practices from the start. It's optimized for AI-assisted development, where an AI can quickly extend the template based on user requirements.
+Xiaomi-FRAS is a face recognition attendance system that automates attendance tracking using biometric face recognition. It replaces manual attendance methods with a secure, real-time system that uses face detection and liveness verification to prevent spoofing.
 
 ## Problems It Solves
 
-1. **Setup Time**: Eliminates boilerplate configuration (TypeScript, Tailwind, ESLint)
-2. **Decision Fatigue**: Pre-made choices for tooling and patterns
-3. **AI Context**: Memory bank provides persistent context for AI assistants
-4. **Extensibility**: Recipe system for adding common features
-5. **Consistency**: Standardized project structure and conventions
+1. **Manual Attendance Overhead**: Eliminates paper-based or manual digital attendance
+2. **Identity Fraud**: Face recognition with liveness detection prevents buddy-punching
+3. **Real-time Tracking**: Instant attendance logging with hardware integration
+4. **Reporting**: Automated attendance reports and exports
+5. **Administration**: Centralized admin panel for managing students, schedules, and attendance
 
 ## How It Should Work (User Flow)
 
-1. User starts with this template
-2. User describes what they want to build to AI assistant
-3. AI adds pages, components, and features as needed
-4. AI uses recipes for common additions (database, auth)
-5. User previews changes via hot reload
-6. Iterate until satisfied
-7. Deploy
+1. Admin configures the system via admin panel
+2. Students register with face data through the registration flow
+3. Attendance is captured via face recognition at scheduled times
+4. Liveness detection ensures real person presence
+5. Reports are generated and can be exported
+6. Hardware integration for camera and sensors
 
 ## Key User Experience Goals
 
-- **Zero to Feature Fast**: Get building immediately, no setup required
-- **AI-Friendly**: Memory bank and recipes make AI assistance effective
-- **Flexible Foundation**: Can become any type of application
-- **Best Practices Built-In**: TypeScript strict mode, ESLint, clean structure
-
-## What This Template Provides
-
-1. **Clean App Structure**: Single page ready for expansion
-2. **Type Safety**: Full TypeScript setup with strict mode
-3. **Modern Styling**: Tailwind CSS 4 ready to use
-4. **Code Quality**: ESLint configured
-5. **Extensibility**: Recipe system for common features
+- **Fast Recognition**: Quick face detection and matching
+- **Security**: Liveness detection to prevent spoofing
+- **Reliability**: Works with hardware integration
+- **Clear Reporting**: Easy-to-read attendance reports
 
 ## Integration Points
 
-- **Database**: Use add-database recipe for Drizzle + SQLite
-- **Styling**: Tailwind CSS pre-configured
-- **AI Assistance**: Memory bank for context persistence
+- **Database**: SQLite/PostgreSQL for data persistence
+- **Hardware**: Camera and sensor integration
+- **WebSocket**: Real-time event streaming
+- **Docker**: Containerized deployment

@@ -1,120 +1,88 @@
-# System Patterns: Next.js Starter Template
+# System Patterns: Xiaomi-FRAS (Face Recognition Attendance System)
 
 ## Architecture Overview
 
 ```
-src/
-├── app/                    # Next.js App Router
-│   ├── layout.tsx          # Root layout + metadata
-│   ├── page.tsx            # Home page
-│   ├── globals.css         # Tailwind imports + global styles
-│   └── favicon.ico         # Site icon
-└── (expand as needed)
-    ├── components/         # React components (add when needed)
-    ├── lib/                # Utilities and helpers (add when needed)
-    └── db/                 # Database files (add via recipe)
+app/
+├── __init__.py              # Flask app factory
+├── config.py                # Configuration
+├── extensions.py            # Flask extensions
+├── views.py                 # Main views
+├── api/                     # REST API endpoints
+│   ├── admin.py             # Admin API
+│   ├── attendance.py        # Attendance API
+│   ├── reports.py           # Reports API
+│   ├── schedules.py         # Schedules API
+│   └── students.py          # Students API
+├── auth/                    # Authentication
+│   ├── decorators.py        # Auth decorators
+│   └── routes.py            # Auth routes
+├── models/                  # Database models
+│   ├── attendance.py        # Attendance model
+│   ├── audit.py             # Audit log model
+│   ├── face.py              # Face data model
+│   ├── schedule.py          # Schedule model
+│   ├── student.py           # Student model
+│   └── user.py              # User model
+├── services/                # Business logic
+│   ├── attendance.py        # Attendance service
+│   ├── engine.py            # Main engine
+│   ├── export.py            # Export service
+│   ├── face_engine.py       # Face recognition engine
+│   ├── hardware.py          # Hardware integration
+│   ├── liveness.py          # Liveness detection
+│   ├── notification.py      # Notifications
+│   └── seed.py              # Data seeding
+├── realtime/                # WebSocket events
+│   └── events.py            # Socket events
+├── templates/               # Jinja2 templates
+│   ├── base.html            # Base template
+│   ├── dashboard.html       # Dashboard
+│   ├── attendance.html      # Attendance view
+│   ├── students.html        # Students list
+│   ├── register.html        # Registration
+│   ├── reports.html         # Reports
+│   ├── schedules.html       # Schedules
+│   └── admin/panel.html     # Admin panel
+└── static/                  # Static assets
+    ├── css/style.css        # Styles
+    ├── js/app.js            # Main JS
+    ├── js/realtime.js       # WebSocket JS
+    ├── manifest.json        # PWA manifest
+    └── sw.js                # Service worker
 ```
 
 ## Key Design Patterns
 
-### 1. App Router Pattern
+### 1. Flask Application Factory
+Uses the Flask application factory pattern for flexible configuration and testing.
 
-Uses Next.js App Router with file-based routing:
+### 2. Service Layer Pattern
+Business logic is separated into service modules for clear separation of concerns.
+
+### 3. Blueprint Pattern
+API routes are organized using Flask blueprints.
+
+### 4. Real-time Communication
+WebSocket integration via Flask-SocketIO for live attendance updates.
+
+### 5. Hardware Abstraction
+Hardware services abstract camera and sensor integration.
+
+## Testing Structure
+
 ```
-src/app/
-├── page.tsx           # Route: /
-├── about/page.tsx     # Route: /about
-├── blog/
-│   ├── page.tsx       # Route: /blog
-│   └── [slug]/page.tsx # Route: /blog/:slug
-└── api/
-    └── route.ts       # API Route: /api
-```
-
-### 2. Component Organization Pattern (When Expanding)
-
-```
-src/components/
-├── ui/                # Reusable UI components (Button, Card, etc.)
-├── layout/            # Layout components (Header, Footer)
-├── sections/          # Page sections (Hero, Features, etc.)
-└── forms/             # Form components
-```
-
-### 3. Server Components by Default
-
-All components are Server Components unless marked with `"use client"`:
-```tsx
-// Server Component (default) - can fetch data, access DB
-export default function Page() {
-  return <div>Server rendered</div>;
-}
-
-// Client Component - for interactivity
-"use client";
-export default function Counter() {
-  const [count, setCount] = useState(0);
-  return <button onClick={() => setCount(c => c + 1)}>{count}</button>;
-}
+tests/
+├── conftest.py              # Test fixtures
+├── test_attendance.py       # Attendance tests
+├── test_auth.py             # Auth tests
+├── test_hardware.py         # Hardware tests
+├── test_liveness.py         # Liveness tests
+└── test_students.py         # Student tests
 ```
 
-### 4. Layout Pattern
+## Deployment
 
-Layouts wrap pages and can be nested:
-```tsx
-// src/app/layout.tsx - Root layout
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <html lang="en">
-      <body>{children}</body>
-    </html>
-  );
-}
-
-// src/app/dashboard/layout.tsx - Nested layout
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex">
-      <Sidebar />
-      <main>{children}</main>
-    </div>
-  );
-}
-```
-
-## Styling Conventions
-
-### Tailwind CSS Usage
-- Utility classes directly on elements
-- Component composition for repeated patterns
-- Responsive: `sm:`, `md:`, `lg:`, `xl:`
-
-### Common Patterns
-```tsx
-// Container
-<div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-
-// Responsive grid
-<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-
-// Flexbox centering
-<div className="flex items-center justify-center">
-```
-
-## File Naming Conventions
-
-- Components: PascalCase (`Button.tsx`, `Header.tsx`)
-- Utilities: camelCase (`utils.ts`, `helpers.ts`)
-- Pages/Routes: lowercase (`page.tsx`, `layout.tsx`)
-- Directories: kebab-case (`api-routes/`) or lowercase (`components/`)
-
-## State Management
-
-For simple needs:
-- `useState` for local component state
-- `useContext` for shared state
-- Server Components for data fetching
-
-For complex needs (add when necessary):
-- Zustand for client state
-- React Query for server state
+- Docker + Docker Compose for containerized deployment
+- Gunicorn as WSGI server
+- Nginx recommended for production reverse proxy
