@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Face Attendance{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="stats-grid" id="stats-grid">
+    <div class="stat-card primary">
+        <div class="stat-icon"><i class="fas fa-users"></i></div>
+        <div class="stat-info">
+            <h3 id="total-students">0</h3>
+            <p>Total Students</p>
+        </div>
+    </div>
+    <div class="stat-card success">
+        <div class="stat-icon"><i class="fas fa-check-circle"></i></div>
+        <div class="stat-info">
+            <h3 id="present-today">0</h3>
+            <p>Present Today</p>
+        </div>
+    </div>
+    <div class="stat-card warning">
+        <div class="stat-icon"><i class="fas fa-clock"></i></div>
+        <div class="stat-info">
+            <h3 id="late-today">0</h3>
+            <p>Late Today</p>
+        </div>
+    </div>
+    <div class="stat-card danger">
+        <div class="stat-icon"><i class="fas fa-user-times"></i></div>
+        <div class="stat-info">
+            <h3 id="absent-today">0</h3>
+            <p>Absent Today</p>
+        </div>
+    </div>
+</div>
+
+<div class="dashboard-row">
+    <div class="card wide">
+        <div class="card-header">
+            <h2><i class="fas fa-chart-bar"></i> Today's Rate</h2>
+        </div>
+        <div class="card-body">
+            <div class="progress-ring-container">
+                <svg class="progress-ring" viewBox="0 0 120 120">
+                    <defs>
+                        <linearGradient id="ring-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" style="stop-color:#00d2ff"/>
+                            <stop offset="100%" style="stop-color:#7b2ff7"/>
+                        </linearGradient>
+                    </defs>
+                    <circle class="progress-ring-bg" cx="60" cy="60" r="54" />
+                    <circle class="progress-ring-fill" id="rate-ring" cx="60" cy="60" r="54" />
+                </svg>
+                <div class="progress-ring-text">
+                    <span id="attendance-rate" class="rate-number">0</span>
+                    <span class="rate-label">percent</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="card wide">
+        <div class="card-header">
+            <h2><i class="fas fa-building"></i> By Department</h2>
+        </div>
+        <div class="card-body">
+            <div id="dept-stats" class="dept-list">
+                <div class="loading"><span class="spinner"></span>Loading...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2><i class="fas fa-chart-line"></i> This Week</h2>
+    </div>
+    <div class="card-body">
+        <canvas id="weekChart" height="160"></canvas>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2><i class="fas fa-calendar-day"></i> Today's Attendance</h2>
+        <a href="/attendance" class="btn btn-sm btn-primary"><i class="fas fa-camera"></i> Start</a>
+    </div>
+    <div class="card-body">
+        <table class="data-table">
+            <thead>
+                <tr><th>Student ID</th><th>Name</th><th>Dept</th><th>Time In</th><th>Status</th><th>Confidence</th></tr>
+            </thead>
+            <tbody id="today-tbody">
+                <tr><td colspan="6" class="empty">No attendance recorded today</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', loadDashboard);
+
+// Listen for live updates
+if (typeof socket !== 'undefined') {
+    socket.on('student_marked', () => loadDashboard());
+    socket.on('stats_update', (data) => {
+        animateCounter(document.getElementById('present-today'), data.present);
+        animateCounter(document.getElementById('late-today'), data.late);
+        animateCounter(document.getElementById('absent-today'), data.absent);
+        animateCounter(document.getElementById('attendance-rate'), data.rate);
+        updateRing(data.rate);
+    });
+}
+
+async function loadDashboard() {
+    try {
+        const [dash, today] = await Promise.all([
+            apiFetch('/api/attendance/dashboard'),
+            apiFetch('/api/attendance/today'),
+        ]);
+
+        animateCounter(document.getElementById('total-students'), dash.total_students);
+        animateCounter(document.getElementById('present-today'), dash.present_today);
+        animateCounter(document.getElementById('late-today'), dash.late_today);
+        animateCounter(document.getElementById('absent-today'), dash.absent_today);
+        animateCounter(document.getElementById('attendance-rate'), dash.attendance_rate_today);
+
+        updateRing(dash.attendance_rate_today);
+
+        // Department stats
+        const deptEl = document.getElementById('dept-stats');
+        if (dash.department_stats && dash.department_stats.length > 0) {
+            deptEl.innerHTML = dash.department_stats.map(d => {
+                const pct = d.total > 0 ? (d.present / d.total * 100) : 0;
+                return `<div class="dept-row">
+                    <span class="dept-name">${escapeHtml(d.department)}</span>
+                    <div class="dept-bar"><div class="dept-bar-fill" style="width:${pct}%"></div></div>
+                    <span class="dept-count">${d.present}/${d.total}</span>
+                </div>`;
+            }).join('');
+        } else {
+            deptEl.innerHTML = '<div class="empty-state"><i class="fas fa-building"></i><p>No department data</p></div>';
+        }
+
+        // Week chart
+        renderWeekChart(dash.week_trend || []);
+
+        // Today table
+        const tbody = document.getElementById('today-tbody');
+        if (today.length > 0) {
+            tbody.innerHTML = today.map(r => `<tr>
+                <td><code>${escapeHtml(r.sid)}</code></td>
+                <td>${escapeHtml(r.name)}</td>
+                <td>${escapeHtml(r.department || '—')}</td>
+                <td>${formatTime(r.time_in)}</td>
+                <td><span class="badge badge-${escapeHtml(r.status)}">${escapeHtml(r.status)}</span></td>
+                <td>${r.confidence ? escapeHtml(String(r.confidence)) + '%' : '—'}</td>
+            </tr>`).join('');
+        }
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+function updateRing(rate) {
+    const ring = document.getElementById('rate-ring');
+    const c = 2 * Math.PI * 54;
+    ring.style.strokeDasharray = c;
+    setTimeout(() => { ring.style.strokeDashoffset = c - (rate / 100) * c; }, 200);
+}
+
+let weekChartInstance = null;
+function renderWeekChart(data) {
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+        const d = new Date(); d.setDate(d.getDate() - i);
+        days.push(d.toISOString().split('T')[0]);
+    }
+    const map = {};
+    data.forEach(d => map[d.date] = d.present);
+    const labels = days.map(d => {
+        const dt = new Date(d + 'T12:00:00');
+        return dt.toLocaleDateString('en', { weekday: 'short' });
+    });
+    const values = days.map(d => map[d] || 0);
+
+    if (weekChartInstance) weekChartInstance.destroy();
+    const ctx = document.getElementById('weekChart').getContext('2d');
+    weekChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Present',
+                data: values,
+                borderColor: '#00d2ff',
+                backgroundColor: 'rgba(0,210,255,0.1)',
+                fill: true,
+                tension: 0.4,
+                pointRadius: 5,
+                pointHoverRadius: 8,
+                pointBackgroundColor: '#00d2ff',
+                borderWidth: 2,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+            },
+            scales: {
+                x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#8888a8' } },
+                y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#8888a8', stepSize: 1 }, beginAtZero: true },
+            }
+        }
+    });
+}
+</script>
+{% endblock %}
