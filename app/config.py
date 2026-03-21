@@ -1,12 +1,18 @@
 """Application configuration."""
 
 import os
+import secrets
 from datetime import timedelta
+
+
+def _generate_secret(length: int = 64) -> str:
+    """Generate a cryptographically secure secret key."""
+    return secrets.token_urlsafe(length)
 
 
 class Config:
     """Base configuration."""
-    SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-change-in-production')
+    SECRET_KEY = os.environ.get('SECRET_KEY', _generate_secret())
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', 'sqlite:///attendance.db')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
@@ -15,12 +21,12 @@ class Config:
         'max_overflow': 20,
     }
 
-    # JWT
-    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'jwt-secret-change-in-production')
+    # JWT — RS256-compatible key length
+    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', _generate_secret())
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=1)
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
     JWT_TOKEN_LOCATION = ['headers', 'cookies']
-    JWT_COOKIE_SECURE = False  # True in production with HTTPS
+    JWT_COOKIE_SECURE = False
     JWT_COOKIE_CSRF_PROTECT = False
     JWT_ACCESS_COOKIE_NAME = 'access_token'
     JWT_REFRESH_COOKIE_NAME = 'refresh_token'
@@ -28,16 +34,14 @@ class Config:
     JWT_ACCESS_COOKIE_PATH = '/'
     JWT_REFRESH_COOKIE_PATH = '/api/auth'
 
-    # Rate Limiting
-    RATELIMIT_STORAGE_URI = os.environ.get('REDIS_URL', 'memory://')
+    # Rate Limiting — Redis-backed by default, memory fallback
+    REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+    RATELIMIT_STORAGE_URI = os.environ.get('RATELIMIT_STORAGE_URI', REDIS_URL)
     RATELIMIT_DEFAULT = '100/minute'
 
     # File Storage
     FACE_DATA_DIR = os.environ.get('FACE_DATA_DIR', os.path.join(os.path.dirname(os.path.dirname(__file__)), 'face_data'))
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max upload
-
-    # Redis
-    REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 
     # Hardware
     FACE_MODEL = os.environ.get('FACE_MODEL', 'buffalo_l')
@@ -50,11 +54,25 @@ class Config:
     # CORS
     CORS_ORIGINS = os.environ.get('CORS_ORIGINS', '*').split(',')
 
+    # Account Lockout
+    MAX_LOGIN_ATTEMPTS = int(os.environ.get('MAX_LOGIN_ATTEMPTS', '5'))
+    LOCKOUT_DURATION = int(os.environ.get('LOCKOUT_DURATION', '300'))
+
+    # Password Policy
+    MIN_PASSWORD_LENGTH = 8
+
+    # Observability
+    METRICS_ENABLED = os.environ.get('METRICS_ENABLED', 'true').lower() == 'true'
+    LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
+    LOG_FORMAT = os.environ.get('LOG_FORMAT', 'json')  # 'json' or 'text'
+
 
 class DevelopmentConfig(Config):
     DEBUG = True
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', 'sqlite:///attendance.db')
     RATELIMIT_STORAGE_URI = 'memory://'
+    METRICS_ENABLED = False
+    LOG_FORMAT = 'text'
 
 
 class ProductionConfig(Config):
@@ -75,6 +93,8 @@ class ProductionConfig(Config):
 class TestingConfig(Config):
     TESTING = True
     SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
+    RATELIMIT_STORAGE_URI = 'memory://'
+    LOG_FORMAT = 'text'
 
 
 config = {

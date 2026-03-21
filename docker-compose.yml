@@ -1,17 +1,20 @@
-version: "3.8"
-
 services:
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "5000:5000"
     environment:
       - FLASK_ENV=production
-      - DATABASE_URL=postgresql://faceapp:faceapp123@db:5432/attendance
+      - DATABASE_URL=postgresql://faceapp:${POSTGRES_PASSWORD:-faceapp123}@db:5432/attendance
       - REDIS_URL=redis://redis:6379/0
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
-      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env}
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in .env}
       - FACE_DATA_DIR=/app/face_data
+      - METRICS_ENABLED=true
+      - LOG_FORMAT=json
+      - LOG_LEVEL=INFO
     volumes:
       - face_data:/app/face_data
     depends_on:
@@ -24,13 +27,20 @@ services:
       resources:
         limits:
           memory: 2G
+          cpus: '2.0'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 5s
+      start-period: 30s
+      retries: 3
 
   db:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: attendance
       POSTGRES_USER: faceapp
-      POSTGRES_PASSWORD: faceapp123
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-faceapp123}
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
@@ -41,9 +51,14 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   redis:
     image: redis:7-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
     ports:
@@ -54,6 +69,10 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
 volumes:
   pgdata:

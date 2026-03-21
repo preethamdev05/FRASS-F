@@ -1,18 +1,85 @@
-"""Flask application factory."""
+"""Flask application factory — Production-grade."""
 
 import os
+import sys
 import logging
-from flask import Flask, jsonify
+from flask import Flask, jsonify, g, request
 from flask_cors import CORS
 from dotenv import load_dotenv
 
 from app.config import config
-from app.extensions import db, migrate, jwt, socketio, limiter
+from app.extensions import db, migrate, jwt, socketio, limiter, init_redis
 
 load_dotenv()
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
-logger = logging.getLogger(__name__)
+
+def _setup_logging(app):
+    """Configure structured logging (JSON for production, text for dev)."""
+    log_level = getattr(logging, app.config.get('LOG_LEVEL', 'INFO').upper(), logging.INFO)
+    log_format = app.config.get('LOG_FORMAT', 'text')
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
+
+    # Remove existing handlers
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
+    handler = logging.StreamHandler(sys.stdout)
+
+    if log_format == 'json':
+        formatter = logging.Formatter(
+            '{"timestamp":"%(asctime)s","level":"%(levelname)s","logger":"%(name)s","message":"%(message)s"}',
+        )
+    else:
+        formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
+
+    handler.setFormatter(formatter)
+    root_logger.addHandler(handler)
+
+    # Quieten noisy loggers
+    logging.getLogger('werkzeug').setLevel(logging.WARNING)
+    logging.getLogger('engineio').setLevel(logging.WARNING)
+
+
+def _setup_metrics(app):
+    """Configure Prometheus metrics instrumentation."""
+    if not app.config.get('METRICS_ENABLED', True):
+        return
+
+    try:
+        from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+
+        request_counter = Counter(
+            'fras_requests_total', 'Total HTTP requests',
+            ['method', 'endpoint', 'status'],
+        )
+        request_duration = Histogram(
+            'fras_request_duration_seconds', 'Request duration in seconds',
+            ['method', 'endpoint'],
+        )
+
+        @app.after_request
+        def _record_metrics(response):
+            if request.endpoint and request.endpoint != 'health_check':
+                try:
+                    request_counter.labels(
+                        method=request.method,
+                        endpoint=request.endpoint,
+                        status=response.status_code,
+                    ).inc()
+                except Exception:
+                    pass
+            return response
+
+        @app.route('/api/metrics')
+        def metrics():
+            from flask import Response
+            return Response(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
+
+        app.logger.info('Prometheus metrics enabled at /api/metrics')
+    except ImportError:
+        app.logger.info('prometheus_client not installed, metrics disabled')
 
 
 def create_app(config_name=None):
@@ -27,6 +94,10 @@ def create_app(config_name=None):
     )
     app.config.from_object(config[config_name])
 
+    # Setup logging first so subsequent init messages are structured
+    _setup_logging(app)
+    logger = logging.getLogger(__name__)
+
     # Ensure face data directory exists
     os.makedirs(app.config['FACE_DATA_DIR'], exist_ok=True)
 
@@ -37,6 +108,12 @@ def create_app(config_name=None):
     socketio.init_app(app)
     limiter.init_app(app)
 
+    # Redis (graceful fallback if unavailable)
+    init_redis(app)
+
+    # Prometheus metrics
+    _setup_metrics(app)
+
     # CORS for API endpoints
     CORS(app, resources={r"/api/*": {
         "origins": app.config.get('CORS_ORIGINS', ['*']),
@@ -45,32 +122,54 @@ def create_app(config_name=None):
         "allow_headers": ["Content-Type", "Authorization"],
     }})
 
+    # Request timing middleware
+    @app.before_request
+    def _start_timer():
+        g.request_start_time = __import__('time').time()
+
     # Security headers middleware
     @app.after_request
-    def set_security_headers(response):
+    def _set_security_headers(response):
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-Frame-Options'] = 'DENY'
         response.headers['X-XSS-Protection'] = '1; mode=block'
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+        response.headers['Permissions-Policy'] = 'camera=(self), microphone=()'
         if app.config.get('JWT_COOKIE_SECURE'):
             response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
         return response
 
-    # Health check endpoint (no auth required — for cloud load balancers)
+    # Health check endpoint (no auth — for cloud load balancers)
     @app.route('/api/health')
     def health_check():
-        """Cloud health check — verifies DB connectivity."""
+        """Cloud health check — verifies DB and Redis connectivity."""
+        checks = {}
+
+        # Database check
         try:
             db.session.execute(db.text('SELECT 1'))
-            db_status = 'ok'
+            checks['database'] = 'ok'
         except Exception as e:
-            db_status = f'error: {str(e)}'
-        status = 'healthy' if db_status == 'ok' else 'degraded'
+            checks['database'] = f'error: {str(e)}'
+
+        # Redis check
+        try:
+            from app.extensions import get_redis
+            r = get_redis()
+            if r:
+                r.ping()
+                checks['redis'] = 'ok'
+            else:
+                checks['redis'] = 'unavailable'
+        except Exception:
+            checks['redis'] = 'error'
+
+        all_ok = all(v == 'ok' for v in checks.values())
         return jsonify(
-            status=status,
-            database=db_status,
+            status='healthy' if all_ok else 'degraded',
+            checks=checks,
             version='2.0.0',
-        ), 200 if status == 'healthy' else 503
+        ), 200 if all_ok else 503
 
     # Import all models so Alembic sees them
     from app.models import user, student, face, attendance, schedule, audit  # noqa: F401
@@ -106,5 +205,5 @@ def create_app(config_name=None):
             from app.services.seed import seed_defaults
             seed_defaults()
 
-    logger.info(f'App created with config: {config_name}')
+    logger.info('App created with config: %s', config_name)
     return app

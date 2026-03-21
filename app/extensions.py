@@ -1,5 +1,6 @@
 """Flask extensions initialization."""
 
+import redis as redis_lib
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
@@ -12,3 +13,29 @@ migrate = Migrate()
 jwt = JWTManager()
 socketio = SocketIO(cors_allowed_origins='*', async_mode='gevent')
 limiter = Limiter(key_func=get_remote_address, default_limits=['100/minute'])
+
+# Redis client — initialized lazily in create_app
+redis_client: redis_lib.Redis | None = None
+
+
+def get_redis() -> redis_lib.Redis | None:
+    """Get the Redis client instance, or None if unavailable."""
+    return redis_client
+
+
+def init_redis(app):
+    """Initialize Redis connection from app config."""
+    global redis_client
+    try:
+        redis_client = redis_lib.from_url(
+            app.config['REDIS_URL'],
+            decode_responses=True,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+            retry_on_timeout=True,
+        )
+        redis_client.ping()
+        app.logger.info('Redis connected: %s', app.config['REDIS_URL'])
+    except Exception as e:
+        app.logger.warning('Redis unavailable (%s), falling back to in-memory', e)
+        redis_client = None
