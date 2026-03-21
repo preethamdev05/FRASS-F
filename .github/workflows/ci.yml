@@ -78,8 +78,8 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
-      - name: Build Docker image
-        run: docker build -t fras:${{ github.sha }} .
+      - name: Build Docker image (no cache)
+        run: docker build --no-cache -t fras:${{ github.sha }} .
       - name: Test Docker image health
         run: |
           docker run -d --name fras-test \
