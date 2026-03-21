@@ -1,9 +1,9 @@
 """Authentication routes."""
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, make_response
 from flask_jwt_extended import (
     create_access_token, create_refresh_token, jwt_required,
-    get_jwt_identity, get_jwt
+    get_jwt_identity, get_jwt, set_access_cookies, set_refresh_cookies
 )
 from app.extensions import db, limiter
 from app.models.user import User
@@ -19,7 +19,7 @@ _token_blacklist = set()
 @auth_bp.route('/login', methods=['POST'])
 @limiter.limit('5/minute')
 def login():
-    """Authenticate user and return JWT tokens."""
+    """Authenticate user and return JWT tokens via HttpOnly cookies."""
     data = request.json
     if not data:
         return jsonify(error='Missing credentials'), 400
@@ -46,11 +46,10 @@ def login():
     db.session.add(log)
     db.session.commit()
 
-    return jsonify(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        user=user.to_dict(),
-    )
+    resp = make_response(jsonify(user=user.to_dict()))
+    set_access_cookies(resp, access_token)
+    set_refresh_cookies(resp, refresh_token)
+    return resp
 
 
 @auth_bp.route('/refresh', methods=['POST'])
@@ -63,7 +62,9 @@ def refresh():
         return jsonify(error='User not found'), 404
 
     access_token = create_access_token(identity=str(user.id), additional_claims={'role': user.role})
-    return jsonify(access_token=access_token)
+    resp = make_response(jsonify(status='refreshed'))
+    set_access_cookies(resp, access_token)
+    return resp
 
 
 @auth_bp.route('/me', methods=['GET'])
@@ -75,6 +76,16 @@ def me():
     if not user:
         return jsonify(error='User not found'), 404
     return jsonify(user.to_dict())
+
+
+@auth_bp.route('/logout', methods=['POST'])
+@jwt_required()
+def logout():
+    """Clear JWT cookies."""
+    resp = make_response(jsonify(status='logged_out'))
+    resp.delete_cookie('access_token')
+    resp.delete_cookie('refresh_token')
+    return resp
 
 
 @auth_bp.route('/register', methods=['POST'])

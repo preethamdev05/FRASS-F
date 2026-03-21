@@ -113,15 +113,14 @@ def delete_student(sid):
     if not student:
         return jsonify(error='Student not found'), 404
 
-    # Delete face encodings file
+    # Delete face encodings from DB
     from app.services.engine import get_face_engine
     get_face_engine().delete_student_encodings(sid)
 
-    # Delete images
-    student_dir = os.path.join(current_app.config['FACE_DATA_DIR'], student.student_id)
-    if os.path.isdir(student_dir):
-        import shutil
-        shutil.rmtree(student_dir, ignore_errors=True)
+    # Delete images via storage service
+    from app.services.storage import StorageService
+    storage = StorageService(current_app.config['FACE_DATA_DIR'])
+    storage.delete_student_dir(student.student_id)
 
     # Audit
     identity = get_jwt_identity()
@@ -171,15 +170,16 @@ def register_face():
     if encoding is None:
         return jsonify(error=msg), 400
 
-    # Save image to disk
+    # Save image to disk via storage service
     import cv2
     import numpy as np
     nparr = np.frombuffer(img_bytes, np.uint8)
     frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
     photo_index = student.photo_count + 1
-    student_dir = os.path.join(current_app.config['FACE_DATA_DIR'], student.student_id)
-    os.makedirs(student_dir, exist_ok=True)
+    from app.services.storage import StorageService
+    storage = StorageService(current_app.config['FACE_DATA_DIR'])
+    student_dir = storage.ensure_dir(student.student_id)
     photo_path = os.path.join(student_dir, f'photo_{photo_index}.jpg')
     cv2.imwrite(photo_path, frame)
 

@@ -1,47 +1,38 @@
 /**
- * Face Attendance System — Frontend v2 (with Auth)
+ * Face Attendance System — Frontend v2 (Cookie-based Auth)
  */
 
-// ─── Auth Token Management ───
+// ─── Auth Management (HttpOnly Cookies) ───
 
-function getToken() {
-    return localStorage.getItem('access_token');
-}
+let _cachedUser = null;
 
 function getUser() {
-    try {
-        return JSON.parse(localStorage.getItem('user'));
-    } catch { return null; }
+    return _cachedUser;
 }
 
 function logout() {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
-    localStorage.removeItem('user');
+    _cachedUser = null;
+    fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     window.location.href = '/login';
 }
 
 // Check auth on every page (except login)
 function requireAuth() {
     if (window.location.pathname === '/login') return;
-    const token = getToken();
-    if (!token) {
-        window.location.href = '/login';
-        return;
-    }
-    // Verify token
-    fetch('/api/auth/me', {
-        headers: { 'Authorization': 'Bearer ' + token }
-    }).then(r => {
-        if (!r.ok) throw new Error('Unauthorized');
-        return r.json();
-    }).then(user => {
-        localStorage.setItem('user', JSON.stringify(user));
-        const el = document.getElementById('user-info');
-        if (el) el.textContent = `${user.username} (${user.role})`;
-    }).catch(() => {
-        logout();
-    });
+    // Verify token via cookie
+    fetch('/api/auth/me', { credentials: 'same-origin' })
+        .then(r => {
+            if (!r.ok) throw new Error('Unauthorized');
+            return r.json();
+        })
+        .then(user => {
+            _cachedUser = user;
+            const el = document.getElementById('user-info');
+            if (el) el.textContent = `${user.username} (${user.role})`;
+        })
+        .catch(() => {
+            logout();
+        });
 }
 
 // ─── XSS Protection ───
@@ -94,15 +85,14 @@ function dismissToast(toast) {
     setTimeout(() => toast.remove(), 300);
 }
 
-// ─── API Helpers (with auth) ───
+// ─── API Helpers (cookie-based auth) ───
 
 async function apiFetch(url, options = {}) {
-    const token = getToken();
     const defaults = {
         headers: {
             'Content-Type': 'application/json',
-            ...(token ? { 'Authorization': 'Bearer ' + token } : {}),
         },
+        credentials: 'same-origin',
     };
     const merged = { ...defaults, ...options };
     merged.headers = { ...defaults.headers, ...(options.headers || {}) };

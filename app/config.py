@@ -21,6 +21,12 @@ class Config:
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
     JWT_TOKEN_LOCATION = ['headers', 'cookies']
     JWT_COOKIE_SECURE = False  # True in production with HTTPS
+    JWT_COOKIE_CSRF_PROTECT = False
+    JWT_ACCESS_COOKIE_NAME = 'access_token'
+    JWT_REFRESH_COOKIE_NAME = 'refresh_token'
+    JWT_COOKIE_SAMESITE = 'Lax'
+    JWT_ACCESS_COOKIE_PATH = '/'
+    JWT_REFRESH_COOKIE_PATH = '/api/auth'
 
     # Rate Limiting
     RATELIMIT_STORAGE_URI = os.environ.get('REDIS_URL', 'memory://')
@@ -56,6 +62,14 @@ class ProductionConfig(Config):
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL')
     RATELIMIT_STORAGE_URI = os.environ.get('REDIS_URL', 'redis://redis:6379/0')
     JWT_COOKIE_SECURE = True
+
+    def __init__(self):
+        for var in ('SECRET_KEY', 'JWT_SECRET_KEY'):
+            val = os.environ.get(var)
+            if not val or val == 'change-me-in-production':
+                raise ValueError(f'{var} must be set to a secure value in production')
+        if not os.environ.get('DATABASE_URL'):
+            raise ValueError('DATABASE_URL must be set in production')
 
 
 class TestingConfig(Config):

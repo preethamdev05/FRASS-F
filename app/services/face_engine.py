@@ -1,7 +1,6 @@
 """Face recognition engine with hardware-adaptive configuration."""
 
 import logging
-import os
 import pickle
 import time
 from typing import List, Optional, Tuple
@@ -20,7 +19,7 @@ class FaceEngine:
         self.model_name = model_name
         self._app = None
         self._known_encodings = {}  # {student_db_id: [encoding_arrays]}
-        self._known_ids = []  # flat list for matching
+        self._known_ids = []
 
     @property
     def app(self):
@@ -94,35 +93,32 @@ class FaceEngine:
             return None, f'Error processing image: {str(e)}'
 
     def save_encoding(self, student_db_id: int, encoding: np.ndarray, photo_path: str = None):
-        """Save a face encoding to disk."""
-        enc_file = os.path.join(self.face_data_dir, f'enc_{student_db_id}.pkl')
-
+        """Save a face encoding to in-memory cache."""
         if student_db_id not in self._known_encodings:
             self._known_encodings[student_db_id] = []
-
         self._known_encodings[student_db_id].append(encoding)
 
-        with open(enc_file, 'wb') as f:
-            pickle.dump(self._known_encodings[student_db_id], f)
-
     def load_all_encodings(self):
-        """Load all face encodings from disk into memory."""
+        """Load all face encodings from database into memory."""
+        from app.models.face import FaceEncoding
+
         self._known_encodings = {}
 
-        if not os.path.exists(self.face_data_dir):
-            return
-
-        for fname in os.listdir(self.face_data_dir):
-            if fname.startswith('enc_') and fname.endswith('.pkl'):
+        try:
+            records = FaceEncoding.query.all()
+            for rec in records:
                 try:
-                    sid = int(fname.replace('enc_', '').replace('.pkl', ''))
-                    with open(os.path.join(self.face_data_dir, fname), 'rb') as f:
-                        self._known_encodings[sid] = pickle.load(f)
+                    enc = pickle.loads(rec.encoding_blob)
+                    if rec.student_id not in self._known_encodings:
+                        self._known_encodings[rec.student_id] = []
+                    self._known_encodings[rec.student_id].append(enc)
                 except Exception as e:
-                    logger.warning(f'Failed to load encoding {fname}: {e}')
+                    logger.warning(f'Failed to decode FaceEncoding id={rec.id}: {e}')
+        except Exception as e:
+            logger.error(f'Failed to load encodings from database: {e}')
 
         total = sum(len(v) for v in self._known_encodings.values())
-        logger.info(f'Loaded {total} face encodings for {len(self._known_encodings)} students')
+        logger.info(f'Loaded {total} face encodings for {len(self._known_encodings)} students from database')
 
     def recognize_face(self, encoding: np.ndarray, tolerance: float = 0.5) -> Tuple[Optional[int], float]:
         """Match a face encoding against known encodings."""
@@ -134,13 +130,11 @@ class FaceEngine:
 
         for student_db_id, encodings in self._known_encodings.items():
             for known_enc in encodings:
-                # Cosine similarity (since embeddings are L2-normalized)
                 similarity = np.dot(encoding, known_enc)
                 if similarity > best_score:
                     best_score = similarity
                     best_id = student_db_id
 
-        # Convert similarity to confidence percentage
         confidence = round(float(best_score) * 100, 1)
 
         if best_score >= tolerance:
@@ -156,11 +150,13 @@ class FaceEngine:
         return results
 
     def delete_student_encodings(self, student_db_id: int):
-        """Remove all encodings for a student."""
+        """Remove all encodings for a student from cache and database."""
+        from app.models.face import FaceEncoding
+        from app.extensions import db
+
         self._known_encodings.pop(student_db_id, None)
-        enc_file = os.path.join(self.face_data_dir, f'enc_{student_db_id}.pkl')
-        if os.path.exists(enc_file):
-            os.remove(enc_file)
+        FaceEncoding.query.filter_by(student_id=student_db_id).delete()
+        db.session.commit()
 
     @property
     def stats(self):

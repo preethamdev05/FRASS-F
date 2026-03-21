@@ -8,7 +8,7 @@ bind = os.environ.get('GUNICORN_BIND', '0.0.0.0:5000')
 
 # Workers — 2-4 for face recognition (memory intensive)
 workers = int(os.environ.get('GUNICORN_WORKERS', min(4, multiprocessing.cpu_count())))
-worker_class = 'eventlet'
+worker_class = 'gevent'
 
 # Timeouts
 timeout = 120

@@ -21,11 +21,12 @@
             </div>
             <div class="card-body">
                 <div class="video-container" id="video-container">
-                    <img id="video-feed" src="" class="video-feed">
+                    <video id="video-feed" autoplay playsinline muted style="display:none;width:100%;border-radius:8px;"></video>
                     <div class="video-placeholder" id="video-placeholder"><i class="fas fa-video-slash"></i><p>Camera not active</p></div>
                     <div class="session-timer" id="session-timer" style="display:none;"><i class="fas fa-stopwatch"></i><span id="timer-display">0:00</span></div>
                     <div class="scanning-indicator" id="scanning-indicator" style="display:none;"><span class="dot"></span>Scanning...</div>
                 </div>
+                <canvas id="capture-canvas" style="display:none;"></canvas>
                 <div class="attendance-controls">
                     <button class="btn btn-success btn-lg" id="start-btn" onclick="startAttendance()"><i class="fas fa-play"></i> Start</button>
                     <button class="btn btn-danger btn-lg" id="stop-btn" onclick="stopAttendance()" style="display:none;"><i class="fas fa-stop"></i> Stop</button>
@@ -49,7 +50,7 @@
 
 {% block scripts %}
 <script>
-let isActive = false, scanTimer = null, sessionTimerInt = null, sessionSecs = 0;
+let isActive = false, scanTimer = null, sessionTimerInt = null, sessionSecs = 0, mediaStream = null;
 document.getElementById('tolerance').addEventListener('input', e => { document.getElementById('tol-val').textContent = e.target.value; });
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -67,8 +68,36 @@ function startTimer() {
 }
 function stopTimer() { clearInterval(sessionTimerInt); document.getElementById('session-timer').style.display = 'none'; }
 
+async function startCamera() {
+    try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }, audio: false });
+        const video = document.getElementById('video-feed');
+        video.srcObject = mediaStream;
+        video.style.display = 'block';
+        document.getElementById('video-placeholder').style.display = 'none';
+        return true;
+    } catch (err) {
+        showToast('Camera access denied or unavailable: ' + err.message, 'error');
+        return false;
+    }
+}
+
+function stopCamera() {
+    if (mediaStream) {
+        mediaStream.getTracks().forEach(t => t.stop());
+        mediaStream = null;
+    }
+    const video = document.getElementById('video-feed');
+    video.srcObject = null;
+    video.style.display = 'none';
+    document.getElementById('video-placeholder').style.display = 'flex';
+}
+
 async function startAttendance() {
     try {
+        const camReady = await startCamera();
+        if (!camReady) return;
+
         const scheduleId = document.getElementById('schedule-select').value;
         const data = await apiFetch('/api/attendance/start', { method: 'POST', body: {
             tolerance: parseFloat(document.getElementById('tolerance').value),
@@ -78,11 +107,8 @@ async function startAttendance() {
         document.getElementById('start-btn').style.display = 'none';
         document.getElementById('stop-btn').style.display = 'inline-flex';
         document.getElementById('scan-btn').style.display = 'inline-flex';
-        document.getElementById('video-placeholder').style.display = 'none';
-        document.getElementById('video-feed').style.display = 'block';
         document.getElementById('mode-badge').classList.add('active');
         document.getElementById('mode-badge').innerHTML = '<i class="fas fa-circle"></i> Active';
-        document.getElementById('video-feed').src = '/api/attendance/video_feed';
         if (typeof joinSession === 'function') joinSession(data.session_id);
         startTimer();
         scanLoop();
@@ -94,60 +120,80 @@ async function stopAttendance() {
     try { await apiFetch('/api/attendance/stop', { method: 'POST' }); } catch(e) {}
     isActive = false;
     clearTimeout(scanTimer); stopTimer();
+    stopCamera();
     document.getElementById('scanning-indicator').style.display = 'none';
     document.getElementById('start-btn').style.display = 'inline-flex';
     document.getElementById('stop-btn').style.display = 'none';
     document.getElementById('scan-btn').style.display = 'none';
-    document.getElementById('video-feed').src = '';
-    document.getElementById('video-feed').style.display = 'none';
-    document.getElementById('video-placeholder').style.display = 'flex';
     document.getElementById('mode-badge').classList.remove('active');
     document.getElementById('mode-badge').innerHTML = '<i class="fas fa-circle"></i> Inactive';
     showToast('Session stopped', 'info');
 }
 
-async function scanLoop() {
+function scanLoop() {
     if (!isActive) return;
-    await scanFrame();
-    if (isActive) scanTimer = setTimeout(scanLoop, 2500);
+    scanFrame().then(() => {
+        if (isActive) scanTimer = setTimeout(scanLoop, 2500);
+    });
 }
 
-async function scanFrame() {
-    if (!isActive) return;
+function scanFrame() {
+    if (!isActive) return Promise.resolve();
     const video = document.getElementById('video-feed');
-    if (!video.naturalWidth) return;
+    if (!video.srcObject || video.readyState < 2) return Promise.resolve();
+
     document.getElementById('scanning-indicator').style.display = 'flex';
-    try {
-        const canvas = document.createElement('canvas');
-        canvas.width = video.naturalWidth; canvas.height = video.naturalHeight;
+
+    return new Promise((resolve) => {
+        const canvas = document.getElementById('capture-canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
         canvas.getContext('2d').drawImage(video, 0, 0);
-        const imageData = canvas.toDataURL('image/jpeg', 0.8);
-        const data = await apiFetch('/api/attendance/recognize', { method: 'POST', body: { image: imageData } });
-        document.getElementById('scanning-indicator').style.display = 'none';
 
-        const recogEl = document.getElementById('recognized-list');
-        if (data.recognized.length > 0) {
-            recogEl.innerHTML = data.recognized.map(r => `
-                <div class="recognized-item ${r.student_id ? 'known' : r.spoof ? 'unknown' : 'unknown'}">
-                    <i class="fas fa-${r.student_id ? 'user-check' : r.spoof ? 'shield-alt' : 'question-circle'}"></i>
-                    <span class="name">${escapeHtml(r.name)}${r.spoof ? ' ⚠️' : ''}</span>
-                    <span class="confidence">${r.confidence}%${r.spoof ? ' L:' + r.liveness_score : ''}</span>
-                </div>
-            `).join('');
-        }
+        canvas.toBlob((blob) => {
+            if (!blob) {
+                document.getElementById('scanning-indicator').style.display = 'none';
+                resolve();
+                return;
+            }
 
-        if (data.newly_marked.length > 0) {
-            const markedEl = document.getElementById('marked-list');
-            data.newly_marked.forEach(m => {
-                const div = document.createElement('div');
-                div.className = 'marked-item new';
-                div.innerHTML = `<i class="fas fa-check-circle"></i><div><strong>${escapeHtml(m.name)}</strong><small>${escapeHtml(m.sid)} • ${m.confidence}%</small></div>`;
-                markedEl.prepend(div);
-                showToast(`✓ ${m.name} marked`, 'success');
-            });
-        }
-        document.getElementById('marked-count').textContent = `${data.total_marked} marked`;
-    } catch (e) { document.getElementById('scanning-indicator').style.display = 'none'; }
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const base64 = reader.result;
+                apiFetch('/api/attendance/recognize', { method: 'POST', body: { image: base64 } })
+                    .then(data => {
+                        document.getElementById('scanning-indicator').style.display = 'none';
+                        const recogEl = document.getElementById('recognized-list');
+                        if (data.recognized.length > 0) {
+                            recogEl.innerHTML = data.recognized.map(r => `
+                                <div class="recognized-item ${r.student_id ? 'known' : r.spoof ? 'unknown' : 'unknown'}">
+                                    <i class="fas fa-${r.student_id ? 'user-check' : r.spoof ? 'shield-alt' : 'question-circle'}"></i>
+                                    <span class="name">${escapeHtml(r.name)}${r.spoof ? ' ⚠️' : ''}</span>
+                                    <span class="confidence">${r.confidence}%${r.spoof ? ' L:' + r.liveness_score : ''}</span>
+                                </div>
+                            `).join('');
+                        }
+                        if (data.newly_marked.length > 0) {
+                            const markedEl = document.getElementById('marked-list');
+                            data.newly_marked.forEach(m => {
+                                const div = document.createElement('div');
+                                div.className = 'marked-item new';
+                                div.innerHTML = `<i class="fas fa-check-circle"></i><div><strong>${escapeHtml(m.name)}</strong><small>${escapeHtml(m.sid)} • ${m.confidence}%</small></div>`;
+                                markedEl.prepend(div);
+                                showToast(`✓ ${m.name} marked`, 'success');
+                            });
+                        }
+                        document.getElementById('marked-count').textContent = `${data.total_marked} marked`;
+                        resolve();
+                    })
+                    .catch(() => {
+                        document.getElementById('scanning-indicator').style.display = 'none';
+                        resolve();
+                    });
+            };
+            reader.readAsDataURL(blob);
+        }, 'image/jpeg', 0.8);
+    });
 }
 </script>
 {% endblock %}

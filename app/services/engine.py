@@ -18,4 +18,5 @@ def get_face_engine() -> FaceEngine:
             face_data_dir=current_app.config['FACE_DATA_DIR'],
             model_name=current_app.config.get('FACE_MODEL', 'buffalo_l'),
         )
+        _engine.load_all_encodings()
     return _engine
