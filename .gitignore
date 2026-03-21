@@ -5,5 +5,3 @@ __pycache__/
 face_data/
 attendance_logs/
 venv/
-node_modules/
-.env
