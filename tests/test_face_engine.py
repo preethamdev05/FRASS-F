@@ -1,8 +1,8 @@
 """Tests for face engine core."""
 
 import numpy as np
+from fras_core.serialization import serialize_embedding as _serialize_single_encoding
 from app.services.face_engine import (
-    _serialize_single_encoding,
     _deserialize_single_encoding,
     _serialize_encodings,
     _deserialize_encodings,

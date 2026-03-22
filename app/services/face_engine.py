@@ -11,7 +11,6 @@ from typing import Optional, Tuple
 import numpy as np
 
 from fras_core.serialization import (
-    serialize_embedding as _serialize_single_encoding,
     deserialize_embedding as _deserialize_single_encoding,
     serialize_encodings as _serialize_encodings,
     deserialize_encodings as _deserialize_encodings,
