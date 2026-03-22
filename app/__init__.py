@@ -164,12 +164,13 @@ def create_app(config_name=None):
         except Exception:
             checks['redis'] = 'error'
 
-        all_ok = all(v == 'ok' for v in checks.values())
+        # Only database is critical — Redis is optional (app falls back to in-memory)
+        db_ok = checks.get('database') == 'ok'
         return jsonify(
-            status='healthy' if all_ok else 'degraded',
+            status='healthy' if db_ok else 'degraded',
             checks=checks,
             version='2.0.0',
-        ), 200 if all_ok else 503
+        ), 200 if db_ok else 503
 
     # Import all models so Alembic sees them
     from app.models import user, student, face, attendance, schedule, audit  # noqa: F401
