@@ -1,0 +1,40 @@
+#!/bin/sh
+# Gradle wrapper script — downloads and runs Gradle
+
+APP_NAME="Gradle"
+APP_BASE_NAME=$(basename "$0")
+MAX_FD="maximum"
+
+warn() { echo "$*"; }
+die() { echo "$*"; exit 1; }
+
+# Determine JAVA_HOME
+if [ -n "$JAVA_HOME" ]; then
+    JAVACMD="$JAVA_HOME/bin/java"
+else
+    JAVACMD="java"
+fi
+
+# Resolve the script directory
+APP_HOME=$(cd "$(dirname "$0")" && pwd)
+
+# Gradle wrapper JAR
+CLASSPATH="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
+
+# Download wrapper JAR if missing
+if [ ! -f "$CLASSPATH" ]; then
+    WRAPPER_URL="https://raw.githubusercontent.com/gradle/gradle/v8.5.0/gradle/wrapper/gradle-wrapper.jar"
+    mkdir -p "$APP_HOME/gradle/wrapper"
+    if command -v curl > /dev/null 2>&1; then
+        curl -fsSL -o "$CLASSPATH" "$WRAPPER_URL"
+    elif command -v wget > /dev/null 2>&1; then
+        wget -q -O "$CLASSPATH" "$WRAPPER_URL"
+    else
+        die "ERROR: Neither curl nor wget found. Install one to download Gradle wrapper."
+    fi
+fi
+
+exec "$JAVACMD" \
+    -classpath "$CLASSPATH" \
+    org.gradle.wrapper.GradleWrapperMain \
+    "$@"
