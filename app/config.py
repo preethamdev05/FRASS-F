@@ -46,7 +46,9 @@ class Config:
 
     # Hardware
     FACE_MODEL = os.environ.get('FACE_MODEL', 'buffalo_l')
-    LIVENESS_THRESHOLD = float(os.environ.get('LIVENESS_THRESHOLD', '0.6'))
+    LIVENESS_THRESHOLD = float(os.environ.get('LIVENESS_THRESHOLD', '0.65'))
+    RECOGNITION_THRESHOLD = float(os.environ.get('RECOGNITION_THRESHOLD', '0.65'))
+    ANTI_SPOOF_MODEL = os.environ.get('ANTI_SPOOF_MODEL', '')  # path to MiniFASNet ONNX
 
     # Attendance Defaults
     DEFAULT_LATE_THRESHOLD = 10  # minutes

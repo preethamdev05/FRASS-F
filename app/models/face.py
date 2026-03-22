@@ -1,4 +1,4 @@
-"""Face encoding model."""
+"""Face encoding model with pgvector support."""
 
 from datetime import datetime, timezone
 from app.extensions import db
@@ -9,9 +9,14 @@ class FaceEncoding(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, db.ForeignKey('students.id'), nullable=False, index=True)
-    encoding_blob = db.Column(db.LargeBinary, nullable=False)  # numpy array bytes
+    encoding_blob = db.Column(db.LargeBinary, nullable=False)  # numpy.tobytes() safe format
     photo_path = db.Column(db.String(512), nullable=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    # pgvector column (PostgreSQL only — NULL on SQLite)
+    # Populated by migration or trigger; stores the same embedding as encoding_blob
+    # but in pgvector format for O(log n) ANN search via HNSW index
+    # embedding_vector = db.Column(Vector(512), nullable=True)  # requires pgvector extension
 
     def to_dict(self):
         return {

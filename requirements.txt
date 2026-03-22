@@ -23,6 +23,7 @@ redis>=5.2.0
 numpy>=1.26.4
 scipy>=1.14.0
 opencv-python-headless>=4.10.0
+onnxruntime>=1.18.0  # ML anti-spoofing inference
 
 # Liveness Detection
 Pillow>=11.0.0

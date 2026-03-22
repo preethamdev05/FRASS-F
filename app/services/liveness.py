@@ -79,18 +79,25 @@ def check_face_quality(face_roi: np.ndarray) -> FaceQuality:
 
 
 class LivenessDetector:
-    """Multi-layer liveness detection for anti-spoofing."""
+    """Multi-layer liveness detection for anti-spoofing.
 
-    def __init__(self, threshold=0.6, enabled_layers=None):
+    Combines heuristic signals (texture, moire, depth, blink, colorspace, quality)
+    with optional ML-based anti-spoofing (MiniFASNet) via weighted fusion.
+
+    Fusion: final_score = alpha * ml_score + (1 - alpha) * heuristic_score
+    """
+
+    def __init__(self, threshold=0.65, enabled_layers=None, antispoof_model_path: str = ''):
         self.threshold = threshold
         # Weights for each layer (must sum to 1.0)
         self.weights = {
-            'texture': 0.20,
-            'moire': 0.15,
-            'depth': 0.20,
-            'blink': 0.20,
+            'texture': 0.15,
+            'moire': 0.10,
+            'depth': 0.15,
+            'blink': 0.15,
             'colorspace': 0.10,
-            'quality': 0.15,
+            'quality': 0.10,
+            'ml_antispoof': 0.25,  # ML model gets highest single weight
         }
         if enabled_layers:
             total = sum(self.weights[k] for k in enabled_layers)
@@ -102,8 +109,12 @@ class LivenessDetector:
         self._ear_history: List[float] = []
         self._max_history = 30
 
+        # ML anti-spoofing (lazy-loaded)
+        self._antispoof = None
+        self._antispoof_path = antispoof_model_path
+
     def analyze(self, face_roi, landmarks=None, frame=None) -> LivenessResult:
-        """Run all enabled liveness checks."""
+        """Run all enabled liveness checks (heuristic + ML)."""
         scores = {}
         reasons = []
 
@@ -119,7 +130,6 @@ class LivenessDetector:
             )
 
         if 'quality' in self.enabled:
-            # Normalize quality score
             q_score = min(1.0, quality.blur_score / 200.0) * 0.5
             q_score += 0.5 if quality.quality_pass else 0.0
             scores['quality'] = q_score
@@ -153,6 +163,23 @@ class LivenessDetector:
             scores['colorspace'] = s
             if s < 0.3:
                 reasons.append('abnormal skin color distribution')
+
+        # ML anti-spoofing (runs alongside heuristics)
+        if 'ml_antispoof' in self.enabled:
+            if self._antispoof is None:
+                from app.services.antispoof import AntiSpoofDetector
+                self._antispoof = AntiSpoofDetector(model_path=self._antispoof_path)
+
+            ml_score = self._antispoof.predict(face_roi)
+            if ml_score >= 0:
+                scores['ml_antispoof'] = ml_score
+                if ml_score < 0.4:
+                    reasons.append(f'ML anti-spoof: spoof detected (score: {ml_score:.2f})')
+            else:
+                # Model unavailable — redistribute weight to heuristics
+                self.enabled = [k for k in self.enabled if k != 'ml_antispoof']
+                total = sum(self.weights[k] for k in self.enabled)
+                self.weights = {k: self.weights[k] / total for k in self.enabled}
 
         # Weighted total
         total = sum(scores.get(k, 0.5) * self.weights.get(k, 0) for k in self.enabled)

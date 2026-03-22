@@ -197,7 +197,51 @@ class FaceEngine:
         self._known_encodings = {}
 
     def recognize_face(self, encoding: np.ndarray, tolerance: float = 0.5) -> Tuple[Optional[int], float]:
-        """Match a face encoding against known encodings."""
+        """Match a face encoding against known encodings.
+
+        Uses pgvector similarity search when PostgreSQL is available,
+        falls back to in-memory O(n) linear scan for SQLite/small datasets.
+        """
+        # Try pgvector first (PostgreSQL with vector extension)
+        result = self._recognize_via_pgvector(encoding, tolerance)
+        if result is not None:
+            return result
+
+        # Fallback: in-memory linear scan
+        return self._recognize_linear(encoding, tolerance)
+
+    def _recognize_via_pgvector(self, encoding: np.ndarray, tolerance: float) -> Tuple[Optional[int], float] | None:
+        """pgvector-based similarity search (O(log n) with HNSW index)."""
+        try:
+            from app.extensions import db
+            # Check if we're using PostgreSQL
+            if 'postgresql' not in str(db.engine.url):
+                return None
+
+            # Convert embedding to pgvector string format: [0.1,0.2,...]
+            vec_str = '[' + ','.join(f'{float(x):.6f}' for x in encoding) + ']'
+
+            result = db.session.execute(
+                db.text("""
+                    SELECT fe.student_id, 1 - (embedding_vector <=> :vec) AS similarity
+                    FROM face_encodings fe
+                    WHERE fe.embedding_vector IS NOT NULL
+                    ORDER BY embedding_vector <=> :vec
+                    LIMIT 1
+                """),
+                {'vec': vec_str}
+            ).fetchone()
+
+            if result and result[1] >= tolerance:
+                return result[0], round(float(result[1]) * 100, 1)
+            elif result:
+                return None, round(float(result[1]) * 100, 1)
+            return None, 0.0
+        except Exception:
+            return None  # pgvector not available, fall back to linear
+
+    def _recognize_linear(self, encoding: np.ndarray, tolerance: float) -> Tuple[Optional[int], float]:
+        """In-memory O(n) cosine similarity scan."""
         if not self._known_encodings:
             return None, 0.0
 

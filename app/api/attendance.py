@@ -33,7 +33,7 @@ def start_attendance():
     session = svc.start_session(
         user_id=int(identity),
         schedule_id=data.get('schedule_id'),
-        tolerance=data.get('tolerance', 0.5),
+        tolerance=data.get('tolerance', current_app.config.get('RECOGNITION_THRESHOLD', 0.65)),
     )
 
     total = Student.query.filter_by(is_active=True).count()
@@ -166,7 +166,10 @@ def recognize():
     from app.services.liveness import LivenessDetector
 
     engine = get_face_engine()
-    liveness = LivenessDetector(threshold=current_app.config.get('LIVENESS_THRESHOLD', 0.6))
+    liveness = LivenessDetector(
+        threshold=current_app.config.get('LIVENESS_THRESHOLD', 0.65),
+        antispoof_model_path=current_app.config.get('ANTI_SPOOF_MODEL', ''),
+    )
 
     # Offload CPU-heavy ML to thread pool to avoid blocking the event loop
     # Backpressure: reject if all inference slots are busy
