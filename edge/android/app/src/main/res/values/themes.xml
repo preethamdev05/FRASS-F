@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.FRAS" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorPrimaryContainer">@color/primary_dark</item>
+        <item name="colorOnPrimary">@android:color/white</item>
+    </style>
+</resources>

@@ -64,12 +64,17 @@ class User(db.Model):
 
     def is_locked(self) -> bool:
         """Check if account is currently locked out."""
-        if self.locked_until and self.locked_until > datetime.now(timezone.utc):
+        if not self.locked_until:
+            return False
+        now = datetime.now(timezone.utc)
+        locked = self.locked_until
+        if locked.tzinfo is None:
+            locked = locked.replace(tzinfo=timezone.utc)
+        if locked > now:
             return True
-        if self.locked_until and self.locked_until <= datetime.now(timezone.utc):
-            # Lockout expired — reset
-            self.failed_login_attempts = 0
-            self.locked_until = None
+        # Lockout expired — reset
+        self.failed_login_attempts = 0
+        self.locked_until = None
         return False
 
     def record_failed_login(self, max_attempts: int = 5, lockout_seconds: int = 300):

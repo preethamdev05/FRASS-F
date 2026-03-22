@@ -1,0 +1,981 @@
+openapi: 3.0.3
+info:
+  title: FRAS - Facial Recognition Attendance System
+  description: API for managing attendance via facial recognition.
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:5000
+    description: Local development
+
+paths:
+  /api/health:
+    get:
+      summary: Health check
+      tags: [System]
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /api/auth/login:
+    post:
+      summary: Authenticate user
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+                mfa_code:
+                  type: string
+                  description: Required if MFA is enabled
+      responses:
+        "200":
+          description: Login successful
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/auth/logout:
+    post:
+      summary: Logout current user
+      tags: [Auth]
+      responses:
+        "200":
+          description: Logged out successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Logged out
+
+  /api/auth/me:
+    get:
+      summary: Get current authenticated user
+      tags: [Auth]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Not authenticated
+
+  /api/auth/mfa/setup:
+    post:
+      summary: Set up multi-factor authentication
+      tags: [Auth]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: MFA setup data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  otp_uri:
+                    type: string
+                  qr_code:
+                    type: string
+                    description: Base64-encoded QR code image
+        "401":
+          description: Not authenticated
+
+  /api/auth/register:
+    post:
+      summary: Register a new user account
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, role]
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+                role:
+                  type: string
+                  enum: [admin, teacher, operator]
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "409":
+          description: Email already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/students:
+    get:
+      summary: List students
+      tags: [Students]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated list of students
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedStudents"
+    post:
+      summary: Create a new student
+      tags: [Students]
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StudentInput"
+      responses:
+        "201":
+          description: Student created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Student"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/students/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Get student by ID
+      tags: [Students]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Student details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Student"
+        "404":
+          description: Student not found
+    put:
+      summary: Update a student
+      tags: [Students]
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StudentInput"
+      responses:
+        "200":
+          description: Student updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Student"
+        "404":
+          description: Student not found
+    delete:
+      summary: Delete a student
+      tags: [Students]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Student deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        "404":
+          description: Student not found
+
+  /api/students/register-face:
+    post:
+      summary: Register face encoding for a student
+      tags: [Students]
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [student_id, image]
+              properties:
+                student_id:
+                  type: string
+                  format: uuid
+                image:
+                  type: string
+                  format: base64
+                  description: Base64-encoded face image
+      responses:
+        "200":
+          description: Face registered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  encoding_id:
+                    type: string
+                    format: uuid
+        "400":
+          description: No face detected or multiple faces
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/attendance/start:
+    post:
+      summary: Start an attendance session
+      tags: [Attendance]
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [schedule_id]
+              properties:
+                schedule_id:
+                  type: string
+                  format: uuid
+                device_id:
+                  type: string
+      responses:
+        "201":
+          description: Session started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttendanceSession"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/attendance/stop:
+    post:
+      summary: Stop an active attendance session
+      tags: [Attendance]
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id]
+              properties:
+                session_id:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Session stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttendanceSession"
+
+  /api/attendance/recognize:
+    post:
+      summary: Recognize a face and mark attendance
+      tags: [Attendance]
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id, image]
+              properties:
+                session_id:
+                  type: string
+                  format: uuid
+                image:
+                  type: string
+                  format: base64
+                device_id:
+                  type: string
+      responses:
+        "200":
+          description: Attendance marked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttendanceRecord"
+        "404":
+          description: Face not recognized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/attendance/mark-manual:
+    post:
+      summary: Manually mark attendance for a student
+      tags: [Attendance]
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id, student_id]
+              properties:
+                session_id:
+                  type: string
+                  format: uuid
+                student_id:
+                  type: string
+                  format: uuid
+                status:
+                  type: string
+                  enum: [present, absent, late, excused]
+                  default: present
+      responses:
+        "200":
+          description: Attendance marked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttendanceRecord"
+
+  /api/attendance/today:
+    get:
+      summary: Get today's attendance records
+      tags: [Attendance]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: session_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Today's attendance
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AttendanceRecord"
+
+  /api/attendance/stats:
+    get:
+      summary: Get attendance statistics
+      tags: [Attendance]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: start
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: end
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Attendance statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttendanceStats"
+
+  /api/attendance/dashboard:
+    get:
+      summary: Get dashboard overview
+      tags: [Attendance]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Dashboard data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dashboard"
+
+  /api/schedules:
+    get:
+      summary: List schedules
+      tags: [Schedules]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: List of schedules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Schedule"
+    post:
+      summary: Create a schedule
+      tags: [Schedules]
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleInput"
+      responses:
+        "201":
+          description: Schedule created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+
+  /api/reports/export/csv:
+    get:
+      summary: Export attendance report as CSV
+      tags: [Reports]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: start
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: end
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: CSV file
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+
+  /api/reports/export/pdf:
+    get:
+      summary: Export attendance report as PDF
+      tags: [Reports]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: start
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: end
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: PDF file
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
+  /api/admin/users:
+    get:
+      summary: List all users (admin only)
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Paginated list of users
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedUsers"
+        "403":
+          description: Forbidden
+
+  /api/admin/audit:
+    get:
+      summary: List audit log entries (admin only)
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: action
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated audit log
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedAuditLogs"
+        "403":
+          description: Forbidden
+
+  /api/admin/hardware:
+    get:
+      summary: List registered hardware devices (admin only)
+      tags: [Admin]
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: List of devices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/HardwareDevice"
+        "403":
+          description: Forbidden
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: token
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [admin, teacher, operator]
+        mfa_enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    PaginatedUsers:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        total:
+          type: integer
+        page:
+          type: integer
+        per_page:
+          type: integer
+        pages:
+          type: integer
+
+    Student:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        student_id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        department:
+          type: string
+        year:
+          type: integer
+        face_registered:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    StudentInput:
+      type: object
+      required: [student_id, name, email]
+      properties:
+        student_id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        department:
+          type: string
+        year:
+          type: integer
+
+    PaginatedStudents:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Student"
+        total:
+          type: integer
+        page:
+          type: integer
+        per_page:
+          type: integer
+        pages:
+          type: integer
+
+    AttendanceSession:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        schedule_id:
+          type: string
+          format: uuid
+        started_by:
+          type: string
+          format: uuid
+        device_id:
+          type: string
+        status:
+          type: string
+          enum: [active, completed, cancelled]
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    AttendanceRecord:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        session_id:
+          type: string
+          format: uuid
+        student_id:
+          type: string
+          format: uuid
+        student_name:
+          type: string
+        status:
+          type: string
+          enum: [present, absent, late, excused]
+        confidence:
+          type: number
+          format: float
+          nullable: true
+        method:
+          type: string
+          enum: [face_recognition, manual]
+        marked_at:
+          type: string
+          format: date-time
+
+    AttendanceStats:
+      type: object
+      properties:
+        total_sessions:
+          type: integer
+        total_present:
+          type: integer
+        total_absent:
+          type: integer
+        total_late:
+          type: integer
+        total_excused:
+          type: integer
+        attendance_rate:
+          type: number
+          format: float
+        by_date:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              present:
+                type: integer
+              absent:
+                type: integer
+              late:
+                type: integer
+
+    Dashboard:
+      type: object
+      properties:
+        today_present:
+          type: integer
+        today_absent:
+          type: integer
+        today_late:
+          type: integer
+        active_sessions:
+          type: integer
+        total_students:
+          type: integer
+        recent_activity:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttendanceRecord"
+
+    Schedule:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        day_of_week:
+          type: integer
+          description: "0=Monday, 6=Sunday"
+        start_time:
+          type: string
+          format: time
+        end_time:
+          type: string
+          format: time
+        room:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ScheduleInput:
+      type: object
+      required: [name, day_of_week, start_time, end_time]
+      properties:
+        name:
+          type: string
+        day_of_week:
+          type: integer
+          minimum: 0
+          maximum: 6
+        start_time:
+          type: string
+          format: time
+        end_time:
+          type: string
+          format: time
+        room:
+          type: string
+
+    AuditLog:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        user_email:
+          type: string
+        action:
+          type: string
+        resource:
+          type: string
+        details:
+          type: object
+        ip_address:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    PaginatedAuditLogs:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditLog"
+        total:
+          type: integer
+        page:
+          type: integer
+        per_page:
+          type: integer
+        pages:
+          type: integer
+
+    HardwareDevice:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        device_id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [camera, kiosk]
+        status:
+          type: string
+          enum: [online, offline, error]
+        last_seen:
+          type: string
+          format: date-time
+        ip_address:
+          type: string

@@ -5,11 +5,17 @@ Cross-worker: Redis version key polled every 2s by engine.py listener.
 """
 
 import logging
-import struct
 import threading
 from typing import Optional, Tuple
 
 import numpy as np
+
+from fras_core.serialization import (
+    serialize_embedding as _serialize_single_encoding,
+    deserialize_embedding as _deserialize_single_encoding,
+    serialize_encodings as _serialize_encodings,
+    deserialize_encodings as _deserialize_encodings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -292,58 +298,3 @@ class FaceEngine:
             'config': {k: v for k, v in self.config.items() if k != 'providers'},
         }
 
-
-# ─── Safe Serialization (numpy.tobytes — no pickle) ───
-
-def _serialize_encodings(encodings: dict[int, list[np.ndarray]]) -> str:
-    """Serialize encoding dict to safe binary format: [count][id_len][id][dim][bytes]..."""
-    parts = []
-    parts.append(struct.pack('I', len(encodings)))
-    for student_id, enc_list in encodings.items():
-        parts.append(struct.pack('I', student_id))
-        parts.append(struct.pack('I', len(enc_list)))
-        for enc in enc_list:
-            raw = enc.astype(EMBEDDING_DTYPE).tobytes()
-            parts.append(raw)
-    return b''.join(parts).decode('latin-1')
-
-
-def _deserialize_encodings(data: str) -> dict[int, list[np.ndarray]] | None:
-    """Deserialize encoding dict from safe binary format."""
-    try:
-        buf = data.encode('latin-1')
-        offset = 0
-
-        count = struct.unpack_from('I', buf, offset)[0]
-        offset += 4
-
-        result = {}
-        for _ in range(count):
-            student_id = struct.unpack_from('I', buf, offset)[0]
-            offset += 4
-            enc_count = struct.unpack_from('I', buf, offset)[0]
-            offset += 4
-
-            enc_list = []
-            for _ in range(enc_count):
-                byte_size = EMBEDDING_DIM * 4  # float32 = 4 bytes
-                if offset + byte_size > len(buf):
-                    raise ValueError('Buffer too short for encoding data')
-                enc = np.frombuffer(buf, dtype=EMBEDDING_DTYPE, count=EMBEDDING_DIM, offset=offset)
-                enc_list.append(enc.copy())
-                offset += byte_size
-            result[student_id] = enc_list
-        return result
-    except Exception as e:
-        logger.warning('Deserialization failed: %s', e)
-        return None
-
-
-def _serialize_single_encoding(encoding: np.ndarray) -> bytes:
-    """Serialize a single encoding to bytes (safe, no pickle)."""
-    return encoding.astype(EMBEDDING_DTYPE).tobytes()
-
-
-def _deserialize_single_encoding(blob: bytes) -> np.ndarray:
-    """Deserialize a single encoding from bytes (safe, no pickle)."""
-    return np.frombuffer(blob, dtype=EMBEDDING_DTYPE).copy()

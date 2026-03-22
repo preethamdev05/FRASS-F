@@ -1,0 +1,20 @@
+<resources>
+    <string name="app_name">FRAS</string>
+    <string name="start_attendance">Start Attendance</string>
+    <string name="stop_attendance">Stop</string>
+    <string name="config">Settings</string>
+    <string name="backend_url">Backend URL</string>
+    <string name="device_id">Device ID</string>
+    <string name="api_key">API Key</string>
+    <string name="save">Save</string>
+    <string name="camera_permission_required">Camera permission is required</string>
+    <string name="no_face_detected">No face detected</string>
+    <string name="face_detected">Face detected</string>
+    <string name="marked_present">Marked Present</string>
+    <string name="unknown_person">Unknown</string>
+    <string name="spoof_detected">Spoof Detected</string>
+    <string name="quality_poor">Poor quality — adjust position</string>
+    <string name="connecting">Connecting…</string>
+    <string name="connected">Connected</string>
+    <string name="disconnected">Disconnected</string>
+</resources>

@@ -63,8 +63,10 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements-dev.txt
-      - name: Run tests
-        run: pytest tests/ -v --tb=short --cov=app --cov-report=term-missing
+      - name: Run unit tests
+        run: pytest tests/test_auth.py tests/test_attendance.py tests/test_students.py tests/test_liveness.py tests/test_antispoof.py tests/test_face_engine.py tests/test_fras_core.py tests/test_hardware.py tests/test_models.py tests/test_services.py -v --tb=short --cov=app --cov=fras_core --cov-report=term-missing
+      - name: Run integration tests (PostgreSQL)
+        run: pytest tests/test_api_integration.py -v --tb=short
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4

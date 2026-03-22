@@ -14,7 +14,7 @@ from app.auth.decorators import role_required
 students_bp = Blueprint('students_api', __name__)
 
 
-def _sanitize_student_id(sid):
+def _sanitize_student_id(sid) -> str | None:
     """Only allow alphanumeric, dash, underscore."""
     if not sid:
         return None
@@ -191,7 +191,7 @@ def register_face():
     engine.save_encoding(student_db_id, encoding, photo_path)
 
     # Save to DB using safe serialization (numpy.tobytes — no pickle)
-    from app.services.face_engine import _serialize_single_encoding
+    from fras_core.serialization import serialize_embedding as _serialize_single_encoding
     face_enc = FaceEncoding(
         student_id=student_db_id,
         encoding_blob=_serialize_single_encoding(encoding),

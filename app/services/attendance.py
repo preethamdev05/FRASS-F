@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime, timezone, date, timedelta, time
-from typing import Optional
+from typing import Any, Optional
 
 from app.extensions import db
 from app.models.attendance import AttendanceRecord, AttendanceSession
@@ -13,7 +13,7 @@ from app.realtime.events import broadcast_student_marked, broadcast_stats_update
 logger = logging.getLogger(__name__)
 
 
-def start_session(user_id: int, schedule_id: int = None, tolerance: float = 0.5) -> AttendanceSession:
+def start_session(user_id: int, schedule_id: Optional[int] = None, tolerance: float = 0.5) -> AttendanceSession:
     """Start a new attendance session."""
     # End any existing active sessions for this user
     active = AttendanceSession.query.filter_by(started_by=user_id, status='active').all()
@@ -56,7 +56,7 @@ def get_active_session() -> Optional[AttendanceSession]:
 
 
 def mark_attendance(student_db_id: int, session_id: int, confidence: float,
-                    method: str = 'face', liveness_score: float = None) -> dict:
+                    method: str = 'face', liveness_score: Optional[float] = None) -> dict[str, Any]:
     """Mark a student as present."""
     session = db.session.get(AttendanceSession, session_id)
     if not session or session.status != 'active':
@@ -110,7 +110,7 @@ def mark_attendance(student_db_id: int, session_id: int, confidence: float,
     return result
 
 
-def mark_manual(student_db_id: int, notes: str = None) -> dict:
+def mark_manual(student_db_id: int, notes: Optional[str] = None) -> dict[str, Any]:
     """Manually mark attendance (no active session required)."""
     today = date.today()
     now = datetime.now(timezone.utc)
@@ -167,7 +167,7 @@ def _compute_status(schedule: Schedule, marked_time: datetime) -> str:
     return 'absent'
 
 
-def get_today_attendance() -> list:
+def get_today_attendance() -> list[dict[str, Any]]:
     """Get today's attendance records."""
     today = date.today()
     records = AttendanceRecord.query.filter_by(date=today)\
@@ -175,7 +175,7 @@ def get_today_attendance() -> list:
     return [r.to_dict_with_student() for r in records]
 
 
-def get_today_stats() -> dict:
+def get_today_stats() -> dict[str, Any]:
     """Get today's attendance statistics."""
     today = date.today()
     total_students = Student.query.filter_by(is_active=True).count()
@@ -197,7 +197,7 @@ def get_today_stats() -> dict:
     }
 
 
-def get_attendance_range(start_date, end_date, student_db_id=None) -> list:
+def get_attendance_range(start_date: date, end_date: date, student_db_id: Optional[int] = None) -> list[dict[str, Any]]:
     """Get attendance records for a date range."""
     query = AttendanceRecord.query.join(Student)\
         .filter(AttendanceRecord.date >= start_date, AttendanceRecord.date <= end_date)
@@ -209,7 +209,7 @@ def get_attendance_range(start_date, end_date, student_db_id=None) -> list:
     return [r.to_dict_with_student() for r in records]
 
 
-def get_dashboard_data() -> dict:
+def get_dashboard_data() -> dict[str, Any]:
     """Get all dashboard data."""
     today = date.today()
     total_students = Student.query.filter_by(is_active=True).count()
