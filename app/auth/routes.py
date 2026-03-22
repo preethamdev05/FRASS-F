@@ -168,7 +168,7 @@ def login():
 def refresh():
     """Refresh access token."""
     identity = get_jwt_identity()
-    user = User.query.get(int(identity))
+    user = db.session.get(User, int(identity))
     if not user or not user.is_active:
         return jsonify(error='User not found'), 404
 
@@ -183,7 +183,7 @@ def refresh():
 def me():
     """Get current user info."""
     identity = get_jwt_identity()
-    user = User.query.get(int(identity))
+    user = db.session.get(User, int(identity))
     if not user:
         return jsonify(error='User not found'), 404
     return jsonify(user.to_dict())
@@ -211,7 +211,7 @@ def logout():
 def mfa_setup():
     """Enable MFA for the current user. Returns QR code URI."""
     identity = get_jwt_identity()
-    user = User.query.get(int(identity))
+    user = db.session.get(User, int(identity))
     if not user:
         return jsonify(error='User not found'), 404
 
@@ -246,7 +246,7 @@ def mfa_setup():
 def mfa_verify():
     """Verify MFA code and enable MFA."""
     identity = get_jwt_identity()
-    user = User.query.get(int(identity))
+    user = db.session.get(User, int(identity))
     data = request.json
 
     code = data.get('code', '') if data else ''
@@ -267,7 +267,7 @@ def mfa_verify():
 def mfa_disable():
     """Disable MFA for the current user (requires password confirmation)."""
     identity = get_jwt_identity()
-    user = User.query.get(int(identity))
+    user = db.session.get(User, int(identity))
     data = request.json
 
     password = data.get('password', '') if data else ''
@@ -327,7 +327,7 @@ def register():
 def change_password():
     """Change own password."""
     identity = get_jwt_identity()
-    user = User.query.get(int(identity))
+    user = db.session.get(User, int(identity))
     data = request.json
 
     old_password = data.get('old_password', '')

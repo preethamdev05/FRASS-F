@@ -55,7 +55,7 @@ def create_schedule():
 @role_required('admin')
 def update_schedule(sid):
     """Update a schedule."""
-    schedule = Schedule.query.get(sid)
+    schedule = db.session.get(Schedule, sid)
     if not schedule:
         return jsonify(error='Schedule not found'), 404
 
@@ -86,7 +86,7 @@ def update_schedule(sid):
 @role_required('admin')
 def delete_schedule(sid):
     """Delete a schedule."""
-    schedule = Schedule.query.get(sid)
+    schedule = db.session.get(Schedule, sid)
     if not schedule:
         return jsonify(error='Schedule not found'), 404
 

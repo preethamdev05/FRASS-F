@@ -73,7 +73,7 @@ def create_student():
 @jwt_required()
 def get_student(sid):
     """Get a student."""
-    student = Student.query.get(sid)
+    student = db.session.get(Student, sid)
     if not student:
         return jsonify(error='Student not found'), 404
     return jsonify(student.to_dict())
@@ -84,7 +84,7 @@ def get_student(sid):
 @role_required('admin', 'teacher')
 def update_student(sid):
     """Update a student."""
-    student = Student.query.get(sid)
+    student = db.session.get(Student, sid)
     if not student:
         return jsonify(error='Student not found'), 404
 
@@ -109,7 +109,7 @@ def update_student(sid):
 @role_required('admin')
 def delete_student(sid):
     """Delete a student and all associated data."""
-    student = Student.query.get(sid)
+    student = db.session.get(Student, sid)
     if not student:
         return jsonify(error='Student not found'), 404
 
@@ -150,7 +150,7 @@ def register_face():
     if not student_db_id or not image_b64:
         return jsonify(error='student_id and image are required'), 400
 
-    student = Student.query.get(student_db_id)
+    student = db.session.get(Student, student_db_id)
     if not student:
         return jsonify(error='Student not found'), 404
 

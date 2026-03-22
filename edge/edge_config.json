@@ -17,6 +17,6 @@
   "offline_queue_max": 1000,
   "sync_interval": 30,
   "config_poll_interval": 60,
-  "tls_enabled": false,
-  "api_key": ""
+  "tls_enabled": true,
+  "api_key": "set-your-api-key"
 }

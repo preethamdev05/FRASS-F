@@ -54,6 +54,7 @@ def stop_attendance():
 def _process_frame(frame, engine, liveness, session):
     """CPU-heavy ML processing — runs in ThreadPoolExecutor."""
     from app.services.liveness import check_face_quality
+    from app.extensions import db as _db
 
     faces = engine.detect_faces(frame)
 
@@ -87,7 +88,7 @@ def _process_frame(frame, engine, liveness, session):
         student_db_id, confidence = engine.recognize_face(encoding, session.tolerance)
 
         if student_db_id and liveness_result.is_live:
-            student = Student.query.get(student_db_id)
+            student = _db.session.get(Student, student_db_id)
             result = svc.mark_attendance(
                 student_db_id=student_db_id,
                 session_id=session.id,
@@ -109,7 +110,7 @@ def _process_frame(frame, engine, liveness, session):
             recognized.append({
                 'student_id': None,
                 'sid': '',
-                'name': f'Spoof? ({student.name if (student := Student.query.get(student_db_id)) else "Unknown"})',
+                'name': f'Spoof? ({student.name if (student := _db.session.get(Student, student_db_id)) else "Unknown"})',
                 'confidence': confidence,
                 'liveness_score': liveness_result.score,
                 'spoof': True,

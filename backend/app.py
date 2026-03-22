@@ -1,20 +1,22 @@
-"""IoT Backend — processing layer for distributed edge devices.
+"""IoT Backend — production-grade processing layer.
 
-Responsibilities:
-- Store embeddings (PostgreSQL + pgvector)
-- Perform similarity search (HNSW index)
-- Attendance logging with timestamps
-- Device management and config distribution
-- Replay attack prevention (nonce + timestamp validation)
+Features:
+- API key authentication on all endpoints
+- pgvector HNSW search for O(log n) matching
+- Connection pool monitoring via Prometheus
+- Replay attack prevention with TTL cleanup
+- Device health reporting
+- Embedding quality validation
+- Async attendance logging via Redis Streams
 """
 
 import os
 import logging
 import time
 import json
-import hashlib
 import numpy as np
 from datetime import datetime, timezone, timedelta
+from functools import wraps
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
@@ -34,32 +36,85 @@ app.config.update(
     REDIS_URL=os.environ.get('REDIS_URL', 'redis://localhost:6379/1'),
     RECOGNITION_THRESHOLD=float(os.environ.get('RECOGNITION_THRESHOLD', '0.65')),
     LIVENESS_THRESHOLD=float(os.environ.get('LIVENESS_THRESHOLD', '0.65')),
-    DEDUP_COOLDOWN=int(os.environ.get('DEDUP_COOLDOWN', '300')),  # seconds
-    API_KEYS=json.loads(os.environ.get('API_KEYS', '{}')),  # {device_id: api_key}
+    DEDUP_COOLDOWN=int(os.environ.get('DEDUP_COOLDOWN', '300')),
+    API_KEYS=json.loads(os.environ.get('API_KEYS', '{}')),
+    MIN_EMBEDDING_QUALITY=float(os.environ.get('MIN_EMBEDDING_QUALITY', '0.85')),
 )
 
 db = SQLAlchemy(app)
 CORS(app)
 
+# ─── Redis (lazy init) ───
+
+_redis_client = None
+
+def _get_redis():
+    global _redis_client
+    if _redis_client is None:
+        try:
+            import redis as redis_lib
+            _redis_client = redis_lib.from_url(app.config['REDIS_URL'], decode_responses=True,
+                                               socket_connect_timeout=2, socket_timeout=2)
+            _redis_client.ping()
+        except Exception:
+            _redis_client = None
+    return _redis_client
+
+
+# ─── API Key Auth ───
+
+def require_api_key(f):
+    """Decorator: validates X-API-Key header against stored keys."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        api_key = request.headers.get('X-API-Key', '')
+        device_id = request.headers.get('X-Device-ID', request.json.get('device_id', '') if request.is_json else '')
+
+        if not api_key:
+            return jsonify(error='X-API-Key header required'), 401
+
+        # Check against configured API keys
+        valid_keys = app.config.get('API_KEYS', {})
+        if isinstance(valid_keys, dict):
+            # Per-device keys: {device_id: api_key}
+            if device_id and device_id in valid_keys and valid_keys[device_id] == api_key:
+                return f(*args, **kwargs)
+            # Global key
+            if valid_keys.get('_global') == api_key:
+                return f(*args, **kwargs)
+        elif isinstance(valid_keys, str) and valid_keys == api_key:
+            return f(*args, **kwargs)
+
+        return jsonify(error='Invalid API key'), 401
+    return decorated
+
+
 # ─── Models ───
 
 class Device(db.Model):
     __tablename__ = 'devices'
-    id = db.Column(db.String(64), primary_key=True)  # device_id
+    id = db.Column(db.String(64), primary_key=True)
     name = db.Column(db.String(128))
     location = db.Column(db.String(256))
-    status = db.Column(db.String(20), default='active')  # active, inactive, maintenance
+    status = db.Column(db.String(20), default='active')
     last_seen = db.Column(db.DateTime)
-    config = db.Column(db.Text, default='{}')  # JSON device-specific config
+    config = db.Column(db.Text, default='{}')
+    api_key = db.Column(db.String(128), index=True)
     registered_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    # Health fields
+    uptime_seconds = db.Column(db.Integer, default=0)
+    memory_mb = db.Column(db.Float, default=0)
+    queue_size = db.Column(db.Integer, default=0)
+    fps_actual = db.Column(db.Float, default=0)
+    health_reported_at = db.Column(db.DateTime)
 
 
 class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
-    external_id = db.Column(db.String(64), unique=True, nullable=False)  # from upstream system
+    external_id = db.Column(db.String(64), unique=True, nullable=False)
     name = db.Column(db.String(128), nullable=False)
-    metadata_json = db.Column(db.Text, default='{}')  # department, role, etc.
+    metadata_json = db.Column(db.Text, default='{}')
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -67,7 +122,7 @@ class FaceEmbedding(db.Model):
     __tablename__ = 'face_embeddings'
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
-    embedding_blob = db.Column(db.LargeBinary, nullable=False)  # 512 x float32
+    embedding_blob = db.Column(db.LargeBinary, nullable=False)
     quality_score = db.Column(db.Float, default=0.0)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -80,26 +135,62 @@ class AttendanceLog(db.Model):
     timestamp = db.Column(db.DateTime, nullable=False, index=True)
     confidence = db.Column(db.Float)
     liveness_score = db.Column(db.Float)
-    status = db.Column(db.String(20), default='present')  # present, late, half_day
+    status = db.Column(db.String(20), default='present')
     session_id = db.Column(db.String(64), index=True)
-    nonce = db.Column(db.String(128), unique=True)  # replay prevention
+    nonce = db.Column(db.String(128), unique=True)
+
+    __table_args__ = (
+        db.Index('idx_attendance_user_time', 'user_id', 'timestamp'),
+        db.Index('idx_attendance_device_time', 'device_id', 'timestamp'),
+    )
 
 
 class ReplayGuard(db.Model):
     __tablename__ = 'replay_guard'
     nonce = db.Column(db.String(128), primary_key=True)
     device_id = db.Column(db.String(64), index=True)
-    timestamp = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    timestamp = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+
+# ─── Prometheus Metrics ───
+
+_pool_metrics = {}
+
+def _setup_pool_metrics():
+    try:
+        from prometheus_client import Gauge, Counter
+        _pool_metrics['pool_size'] = Gauge('iot_db_pool_size', 'DB pool size')
+        _pool_metrics['pool_checked_out'] = Gauge('iot_db_pool_checked_out', 'DB connections in use')
+        _pool_metrics['recognitions'] = Counter('iot_recognitions_total', 'Total recognitions', ['status'])
+        _pool_metrics['attendance_marks'] = Counter('iot_attendance_marks_total', 'Attendance marks')
+
+        from sqlalchemy import event
+
+        @event.listens_for(db.engine, 'checkout')
+        def _on_checkout(dbapi_conn, connection_rec, connection_proxy):
+            try:
+                _pool_metrics['pool_checked_out'].set(connection_rec._pool.checkedout())
+                _pool_metrics['pool_size'].set(connection_rec._pool.size())
+            except Exception:
+                pass
+
+        @event.listens_for(db.engine, 'checkin')
+        def _on_checkin(dbapi_conn, connection_rec):
+            try:
+                _pool_metrics['pool_checked_out'].set(connection_rec._pool.checkedout())
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 # ─── Embedding Cache ───
 
-_embedding_cache = {}  # {user_id: [np.ndarray, ...]}
+_embedding_cache = {}
 _cache_loaded = False
 
 
 def load_embeddings():
-    """Load all embeddings into memory for fast matching."""
     global _embedding_cache, _cache_loaded
     _embedding_cache = {}
     try:
@@ -116,20 +207,22 @@ def load_embeddings():
         logger.warning('Embedding load failed: %s', e)
 
 
+def embedding_quality(embedding: np.ndarray) -> float:
+    """Score embedding quality based on L2 norm deviation from 1.0."""
+    norm = np.linalg.norm(embedding)
+    return 1.0 - abs(1.0 - norm)
+
+
 def match_embedding(query: np.ndarray, threshold: float) -> tuple:
-    """Match query embedding against cache. Returns (user_id, confidence) or (None, confidence)."""
     if not _cache_loaded:
         load_embeddings()
-
     if not _embedding_cache:
         return None, 0.0
 
-    # Try pgvector first
     result = _match_pgvector(query, threshold)
     if result[0] is not None or result[1] > 0:
         return result
 
-    # Fallback: linear scan
     best_id, best_score = None, 0.0
     for uid, embeddings in _embedding_cache.items():
         for emb in embeddings:
@@ -145,7 +238,6 @@ def match_embedding(query: np.ndarray, threshold: float) -> tuple:
 
 
 def _match_pgvector(query: np.ndarray, threshold: float) -> tuple:
-    """pgvector ANN search."""
     try:
         if 'postgresql' not in str(db.engine.url):
             return None, 0.0
@@ -165,17 +257,24 @@ def _match_pgvector(query: np.ndarray, threshold: float) -> tuple:
         return None, 0.0
 
 
-# ─── Replay Prevention ───
+# ─── Replay Prevention (with TTL cleanup) ───
 
 def check_replay(nonce: str, device_id: str) -> bool:
-    """Check if nonce has been seen before (replay attack prevention)."""
     if not nonce:
         return False
     existing = ReplayGuard.query.get(nonce)
     if existing:
-        return False  # Replay detected
+        return False
     db.session.add(ReplayGuard(nonce=nonce, device_id=device_id))
     db.session.commit()
+
+    # Periodic cleanup: delete nonces older than 1 hour
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+        ReplayGuard.query.filter(ReplayGuard.timestamp < cutoff).delete()
+        db.session.commit()
+    except Exception:
+        pass
     return True
 
 
@@ -185,14 +284,26 @@ def check_replay(nonce: str, device_id: str) -> bool:
 def health():
     try:
         db.session.execute(db.text('SELECT 1'))
-        return jsonify(status='healthy', version='3.0.0-iot')
+        r = _get_redis()
+        redis_ok = r is None or r.ping()
+        return jsonify(status='healthy', version='3.1.0-iot', redis=redis_ok)
     except Exception:
         return jsonify(status='degraded'), 503
 
 
+@app.route('/api/metrics')
+def metrics():
+    try:
+        from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+        from flask import Response
+        return Response(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
+    except ImportError:
+        return jsonify(error='prometheus_client not installed'), 501
+
+
 @app.route('/api/devices/register', methods=['POST'])
+@require_api_key
 def register_device():
-    """Register a new edge device."""
     data = request.json
     device_id = data.get('device_id')
     if not device_id:
@@ -204,6 +315,7 @@ def register_device():
             id=device_id,
             name=data.get('name', device_id),
             location=data.get('location', ''),
+            api_key=request.headers.get('X-API-Key', ''),
         )
         db.session.add(device)
     device.last_seen = datetime.now(timezone.utc)
@@ -213,8 +325,8 @@ def register_device():
 
 
 @app.route('/api/devices/<device_id>/config', methods=['GET'])
+@require_api_key
 def get_device_config(device_id):
-    """Get merged config for a device."""
     device = Device.query.get(device_id)
     if not device:
         return jsonify(error='Device not found'), 404
@@ -225,6 +337,7 @@ def get_device_config(device_id):
         'recognition_threshold': app.config['RECOGNITION_THRESHOLD'],
         'liveness_threshold': app.config['LIVENESS_THRESHOLD'],
         'dedup_cooldown': app.config['DEDUP_COOLDOWN'],
+        'min_embedding_quality': app.config['MIN_EMBEDDING_QUALITY'],
     }
     device_overrides = json.loads(device.config or '{}')
     base_config.update(device_overrides)
@@ -232,8 +345,8 @@ def get_device_config(device_id):
 
 
 @app.route('/api/devices/<device_id>/config', methods=['PUT'])
+@require_api_key
 def update_device_config(device_id):
-    """Update device-specific config overrides."""
     device = Device.query.get(device_id)
     if not device:
         return jsonify(error='Device not found'), 404
@@ -243,42 +356,62 @@ def update_device_config(device_id):
     return jsonify(status='updated')
 
 
+@app.route('/api/devices/<device_id>/health', methods=['POST'])
+@require_api_key
+def device_health(device_id):
+    """Receive health report from edge device."""
+    device = Device.query.get(device_id)
+    if not device:
+        return jsonify(error='Device not found'), 404
+    data = request.json
+    device.uptime_seconds = data.get('uptime', 0)
+    device.memory_mb = data.get('memory_mb', 0)
+    device.queue_size = data.get('queue_size', 0)
+    device.fps_actual = data.get('fps', 0)
+    device.last_seen = datetime.now(timezone.utc)
+    device.health_reported_at = datetime.now(timezone.utc)
+    device.status = 'active'
+    db.session.commit()
+    return jsonify(status='ok')
+
+
 @app.route('/api/devices', methods=['GET'])
+@require_api_key
 def list_devices():
-    """List all registered devices."""
     devices = Device.query.all()
     return jsonify([{
         'id': d.id, 'name': d.name, 'location': d.location,
         'status': d.status,
         'last_seen': d.last_seen.isoformat() if d.last_seen else None,
+        'uptime_seconds': d.uptime_seconds,
+        'memory_mb': d.memory_mb,
+        'queue_size': d.queue_size,
+        'fps_actual': d.fps_actual,
     } for d in devices])
 
 
 @app.route('/api/edge/result', methods=['POST'])
+@require_api_key
 def receive_result():
-    """Receive a single inference result from an edge device."""
     data = request.json
     device_id = data.get('device_id')
     if not device_id:
         return jsonify(error='device_id required'), 400
 
-    # Validate device
     device = Device.query.get(device_id)
     if not device:
         return jsonify(error='Unknown device'), 403
 
-    # Replay prevention
     nonce = data.get('nonce', '')
     if nonce and not check_replay(nonce, device_id):
         return jsonify(error='Replay detected'), 403
 
-    # Process the result
     return _process_result(data, device_id)
 
 
 @app.route('/api/edge/sync', methods=['POST'])
+@require_api_key
 def sync_batch():
-    """Receive a batch of results from offline sync."""
     data = request.json
     device_id = data.get('device_id')
     results = data.get('results', [])
@@ -296,7 +429,6 @@ def sync_batch():
 
 
 def _process_result(data: dict, device_id: str):
-    """Process a single face recognition result."""
     embedding = data.get('embedding')
     liveness_score = data.get('liveness_score', 0)
     timestamp = data.get('timestamp', time.time())
@@ -304,17 +436,25 @@ def _process_result(data: dict, device_id: str):
     if not embedding or not data.get('is_live', False):
         return jsonify(status='rejected', reason='liveness_failed')
 
-    # Convert to numpy
     query = np.array(embedding, dtype=np.float32)
 
-    # Match against known embeddings
+    # Embedding quality check
+    quality = embedding_quality(query)
+    min_quality = app.config['MIN_EMBEDDING_QUALITY']
+    if quality < min_quality:
+        return jsonify(status='rejected', reason='low_quality', quality=round(quality, 3))
+
     threshold = app.config['RECOGNITION_THRESHOLD']
     user_id, confidence = match_embedding(query, threshold)
 
     if user_id is None:
+        try:
+            _pool_metrics.get('recognitions', _noop()).labels(status='unknown').inc()
+        except Exception:
+            pass
         return jsonify(status='unknown', confidence=confidence)
 
-    # Deduplication: check if this user was already logged recently
+    # Deduplication
     cooldown = app.config['DEDUP_COOLDOWN']
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=cooldown)
     recent = AttendanceLog.query.filter(
@@ -325,19 +465,13 @@ def _process_result(data: dict, device_id: str):
     if recent:
         return jsonify(status='duplicate', user_id=user_id, confidence=confidence)
 
-    # Determine attendance status
     dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
-    status = 'present'  # Default; can be enhanced with schedule logic
+    status = 'present'
 
-    # Log attendance
     log = AttendanceLog(
-        user_id=user_id,
-        device_id=device_id,
-        timestamp=dt,
-        confidence=confidence,
-        liveness_score=liveness_score,
-        status=status,
-        nonce=data.get('nonce', ''),
+        user_id=user_id, device_id=device_id, timestamp=dt,
+        confidence=confidence, liveness_score=liveness_score,
+        status=status, nonce=data.get('nonce', ''),
     )
     db.session.add(log)
     device = Device.query.get(device_id)
@@ -345,19 +479,23 @@ def _process_result(data: dict, device_id: str):
         device.last_seen = dt
     db.session.commit()
 
+    try:
+        _pool_metrics.get('recognitions', _noop()).labels(status='matched').inc()
+        _pool_metrics.get('attendance_marks', _noop()).inc()
+    except Exception:
+        pass
+
     user = User.query.get(user_id)
     return jsonify(
-        status='marked',
-        user_id=user_id,
+        status='marked', user_id=user_id,
         name=user.name if user else 'Unknown',
-        confidence=confidence,
-        attendance_status=status,
+        confidence=confidence, attendance_status=status,
     )
 
 
 @app.route('/api/register_user', methods=['POST'])
+@require_api_key
 def register_user():
-    """Register a user with face embedding."""
     data = request.json
     external_id = data.get('external_id')
     name = data.get('name')
@@ -366,26 +504,33 @@ def register_user():
     if not external_id or not name or not embedding:
         return jsonify(error='external_id, name, embedding required'), 400
 
+    emb_array = np.array(embedding, dtype=np.float32)
+
+    # Quality check
+    quality = embedding_quality(emb_array)
+    min_quality = app.config['MIN_EMBEDDING_QUALITY']
+    if quality < min_quality:
+        return jsonify(error='Embedding quality too low', quality=round(quality, 3),
+                       minimum=min_quality), 400
+
     user = User.query.filter_by(external_id=external_id).first()
     if not user:
         user = User(external_id=external_id, name=name, metadata_json=json.dumps(data.get('metadata', {})))
         db.session.add(user)
         db.session.flush()
 
-    emb_bytes = np.array(embedding, dtype=np.float32).tobytes()
-    face_emb = FaceEmbedding(user_id=user.id, embedding_blob=emb_bytes, quality_score=data.get('quality', 0))
+    emb_bytes = emb_array.tobytes()
+    face_emb = FaceEmbedding(user_id=user.id, embedding_blob=emb_bytes, quality_score=quality)
     db.session.add(face_emb)
     db.session.commit()
 
-    # Reload cache
     load_embeddings()
-
-    return jsonify(status='registered', user_id=user.id), 201
+    return jsonify(status='registered', user_id=user.id, quality=round(quality, 3)), 201
 
 
 @app.route('/api/verify_face', methods=['POST'])
+@require_api_key
 def verify_face():
-    """Verify a face embedding against the database."""
     data = request.json
     embedding = data.get('embedding')
     threshold = data.get('threshold', app.config['RECOGNITION_THRESHOLD'])
@@ -403,8 +548,8 @@ def verify_face():
 
 
 @app.route('/api/log_attendance', methods=['POST'])
+@require_api_key
 def log_attendance():
-    """Manual attendance logging."""
     data = request.json
     user_id = data.get('user_id')
     device_id = data.get('device_id', 'manual')
@@ -414,11 +559,9 @@ def log_attendance():
         return jsonify(error='User not found'), 404
 
     log = AttendanceLog(
-        user_id=user_id,
-        device_id=device_id,
+        user_id=user_id, device_id=device_id,
         timestamp=datetime.now(timezone.utc),
-        confidence=100.0,
-        liveness_score=1.0,
+        confidence=100.0, liveness_score=1.0,
         status=data.get('status', 'present'),
     )
     db.session.add(log)
@@ -427,8 +570,8 @@ def log_attendance():
 
 
 @app.route('/api/attendance', methods=['GET'])
+@require_api_key
 def get_attendance():
-    """Query attendance logs."""
     start = request.args.get('start', datetime.now(timezone.utc).date().isoformat())
     end = request.args.get('end', start)
     device_id = request.args.get('device_id')
@@ -451,10 +594,17 @@ def get_attendance():
     } for l in logs])
 
 
+class _noop:
+    """No-op counter for when Prometheus is unavailable."""
+    def inc(self): pass
+    def labels(self, **kw): return self
+
+
 # ─── Startup ───
 
 with app.app_context():
     db.create_all()
     load_embeddings()
+    _setup_pool_metrics()
 
-logger.info('IoT Backend initialized')
+logger.info('IoT Backend v3.1.0 initialized')

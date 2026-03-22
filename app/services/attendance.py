@@ -42,7 +42,7 @@ def start_session(user_id: int, schedule_id: int = None, tolerance: float = 0.5)
 
 def stop_session(session_id: int) -> AttendanceSession:
     """End an attendance session."""
-    session = AttendanceSession.query.get(session_id)
+    session = db.session.get(AttendanceSession, session_id)
     if session:
         session.status = 'ended'
         session.ended_at = datetime.now(timezone.utc)
@@ -58,7 +58,7 @@ def get_active_session() -> Optional[AttendanceSession]:
 def mark_attendance(student_db_id: int, session_id: int, confidence: float,
                     method: str = 'face', liveness_score: float = None) -> dict:
     """Mark a student as present."""
-    session = AttendanceSession.query.get(session_id)
+    session = db.session.get(AttendanceSession, session_id)
     if not session or session.status != 'active':
         return {'error': 'No active session'}
 
@@ -92,7 +92,7 @@ def mark_attendance(student_db_id: int, session_id: int, confidence: float,
     db.session.add(record)
     db.session.commit()
 
-    student = Student.query.get(student_db_id)
+    student = db.session.get(Student, student_db_id)
     result = {
         'status': 'marked',
         'record': record.to_dict(),

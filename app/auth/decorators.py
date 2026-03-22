@@ -13,7 +13,8 @@ def role_required(*roles):
         def wrapper(*args, **kwargs):
             verify_jwt_in_request()
             identity = get_jwt_identity()
-            user = User.query.get(int(identity))
+            from app.extensions import db
+            user = db.session.get(User, int(identity))
             if not user or user.role not in roles:
                 return jsonify(error='Insufficient permissions'), 403
             return fn(*args, **kwargs)
@@ -25,7 +26,8 @@ def get_current_user():
     """Get the current authenticated user."""
     identity = get_jwt_identity()
     if identity:
-        return User.query.get(int(identity))
+        from app.extensions import db
+        return db.session.get(User, int(identity))
     return None
 
 

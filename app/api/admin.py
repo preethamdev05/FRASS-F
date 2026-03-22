@@ -25,7 +25,7 @@ def list_users():
 @role_required('admin')
 def update_user(uid):
     """Update a user (admin only)."""
-    user = User.query.get(uid)
+    user = db.session.get(User, uid)
     if not user:
         return jsonify(error='User not found'), 404
 
@@ -46,7 +46,7 @@ def update_user(uid):
 @role_required('admin')
 def delete_user(uid):
     """Delete a user."""
-    user = User.query.get(uid)
+    user = db.session.get(User, uid)
     if not user:
         return jsonify(error='User not found'), 404
 
