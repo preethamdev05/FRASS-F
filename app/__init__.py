@@ -59,6 +59,32 @@ def _setup_metrics(app):
             ['method', 'endpoint'],
         )
 
+        # Connection pool monitoring
+        try:
+            from prometheus_client import Gauge
+            pool_size_gauge = Gauge('fras_db_pool_size', 'Database connection pool size')
+            pool_checked_out = Gauge('fras_db_pool_checked_out', 'Database connections checked out')
+
+            from sqlalchemy import event
+            engine = db.engine
+
+            @event.listens_for(engine, 'checkout')
+            def _on_checkout(dbapi_conn, connection_rec, connection_proxy):
+                try:
+                    pool_checked_out.set(connection_rec._pool.checkedout())
+                    pool_size_gauge.set(connection_rec._pool.size())
+                except Exception:
+                    pass
+
+            @event.listens_for(engine, 'checkin')
+            def _on_checkin(dbapi_conn, connection_rec):
+                try:
+                    pool_checked_out.set(connection_rec._pool.checkedout())
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         @app.after_request
         def _record_metrics(response):
             if request.endpoint and request.endpoint != 'health_check':

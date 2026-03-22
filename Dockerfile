@@ -42,6 +42,7 @@ COPY . .
 
 # Create non-root user
 RUN useradd -m -s /bin/bash appuser && chown -R appuser:appuser /app
+RUN chmod +x /app/docker-entrypoint.sh
 USER appuser
 
 EXPOSE 5000
@@ -49,4 +50,4 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:5000/api/health || exit 1
 
-CMD ["gunicorn", "--config", "gunicorn.conf.py", "app:create_app()"]
+CMD ["/app/docker-entrypoint.sh"]

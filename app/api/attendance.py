@@ -15,7 +15,11 @@ from app.services import attendance as svc
 
 attendance_bp = Blueprint('attendance_api', __name__)
 
-_thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+# Capped thread pool — 2 workers max per gunicorn process to prevent OOM
+# Each InsightFace inference uses ~500MB RAM; 4 workers × 4 threads = 16GB is too much
+_thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+_inference_in_progress = 0
+_max_concurrent_inferences = 2
 
 
 @attendance_bp.route('/start', methods=['POST'])
@@ -165,8 +169,17 @@ def recognize():
     liveness = LivenessDetector(threshold=current_app.config.get('LIVENESS_THRESHOLD', 0.6))
 
     # Offload CPU-heavy ML to thread pool to avoid blocking the event loop
-    future = _thread_pool.submit(_process_frame, frame, engine, liveness, session)
-    recognized, newly_marked = future.result(timeout=30)
+    # Backpressure: reject if all inference slots are busy
+    global _inference_in_progress
+    if _inference_in_progress >= _max_concurrent_inferences:
+        return jsonify(error='Server busy, try again in a moment'), 429
+
+    _inference_in_progress += 1
+    try:
+        future = _thread_pool.submit(_process_frame, frame, engine, liveness, session)
+        recognized, newly_marked = future.result(timeout=30)
+    finally:
+        _inference_in_progress -= 1
 
     total_marked = AttendanceRecord.query.filter_by(session_id=session.id).count()
 

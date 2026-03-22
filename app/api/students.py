@@ -186,11 +186,11 @@ def register_face():
     # Save encoding
     engine.save_encoding(student_db_id, encoding, photo_path)
 
-    # Save to DB
-    import pickle
+    # Save to DB using safe serialization (numpy.tobytes — no pickle)
+    from app.services.face_engine import _serialize_single_encoding
     face_enc = FaceEncoding(
         student_id=student_db_id,
-        encoding_blob=pickle.dumps(encoding),
+        encoding_blob=_serialize_single_encoding(encoding),
         photo_path=photo_path,
     )
     db.session.add(face_enc)

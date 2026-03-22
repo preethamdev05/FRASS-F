@@ -1,7 +1,11 @@
-"""Face recognition engine with hardware-adaptive configuration and Redis cache."""
+"""Face recognition engine with hardware-adaptive configuration and Redis cache.
+
+Safe serialization: uses numpy.tobytes() instead of pickle for encoding storage.
+Cross-worker: Redis version key polled every 2s by engine.py listener.
+"""
 
 import logging
-import pickle
+import struct
 from typing import Optional, Tuple
 
 import numpy as np
@@ -11,6 +15,10 @@ logger = logging.getLogger(__name__)
 # Redis cache keys
 ENCODING_CACHE_KEY = 'face:encodings'
 ENCODING_VERSION_KEY = 'face:encodings:version'
+
+# Embedding dimensions (ArcFace produces 512-dim float32 vectors)
+EMBEDDING_DIM = 512
+EMBEDDING_DTYPE = np.float32
 
 
 class FaceEngine:
@@ -130,7 +138,9 @@ class FaceEngine:
             if not cached:
                 return False
 
-            data = pickle.loads(cached.encode('latin-1'))
+            data = _deserialize_encodings(cached)
+            if data is None:
+                return False
             self._known_encodings = data
             total = sum(len(v) for v in self._known_encodings.values())
             logger.info('Loaded %d encodings for %d students from Redis cache',
@@ -148,7 +158,7 @@ class FaceEngine:
             records = FaceEncoding.query.all()
             for rec in records:
                 try:
-                    enc = pickle.loads(rec.encoding_blob)
+                    enc = _deserialize_single_encoding(rec.encoding_blob)
                     if rec.student_id not in self._known_encodings:
                         self._known_encodings[rec.student_id] = []
                     self._known_encodings[rec.student_id].append(enc)
@@ -168,8 +178,8 @@ class FaceEngine:
             r = get_redis()
             if not r:
                 return
-            data = pickle.dumps(self._known_encodings)
-            r.set(ENCODING_CACHE_KEY, data.decode('latin-1'))
+            encoded = _serialize_encodings(self._known_encodings)
+            r.set(ENCODING_CACHE_KEY, encoded)
             r.incr(ENCODING_VERSION_KEY)
         except Exception as e:
             logger.warning('Redis cache sync failed: %s', e)
@@ -229,3 +239,57 @@ class FaceEngine:
             'total_encodings': total_encodings,
             'config': {k: v for k, v in self.config.items() if k != 'providers'},
         }
+
+
+# ─── Safe Serialization (numpy.tobytes — no pickle) ───
+
+def _serialize_encodings(encodings: dict[int, list[np.ndarray]]) -> str:
+    """Serialize encoding dict to safe binary format: [count][id_len][id][dim][bytes]..."""
+    parts = []
+    parts.append(struct.pack('I', len(encodings)))
+    for student_id, enc_list in encodings.items():
+        parts.append(struct.pack('I', student_id))
+        parts.append(struct.pack('I', len(enc_list)))
+        for enc in enc_list:
+            raw = enc.astype(EMBEDDING_DTYPE).tobytes()
+            parts.append(raw)
+    return b''.join(parts).decode('latin-1')
+
+
+def _deserialize_encodings(data: str) -> dict[int, list[np.ndarray]] | None:
+    """Deserialize encoding dict from safe binary format."""
+    try:
+        buf = data.encode('latin-1')
+        offset = 0
+
+        count = struct.unpack_from('I', buf, offset)[0]
+        offset += 4
+
+        result = {}
+        for _ in range(count):
+            student_id = struct.unpack_from('I', buf, offset)[0]
+            offset += 4
+            enc_count = struct.unpack_from('I', buf, offset)[0]
+            offset += 4
+
+            enc_list = []
+            for _ in range(enc_count):
+                byte_size = EMBEDDING_DIM * 4  # float32 = 4 bytes
+                enc = np.frombuffer(buf, dtype=EMBEDDING_DTYPE, count=EMBEDDING_DIM, offset=offset)
+                enc_list.append(enc.copy())
+                offset += byte_size
+            result[student_id] = enc_list
+        return result
+    except Exception as e:
+        logger.warning('Deserialization failed: %s', e)
+        return None
+
+
+def _serialize_single_encoding(encoding: np.ndarray) -> bytes:
+    """Serialize a single encoding to bytes (safe, no pickle)."""
+    return encoding.astype(EMBEDDING_DTYPE).tobytes()
+
+
+def _deserialize_single_encoding(blob: bytes) -> np.ndarray:
+    """Deserialize a single encoding from bytes (safe, no pickle)."""
+    return np.frombuffer(blob, dtype=EMBEDDING_DTYPE).copy()
