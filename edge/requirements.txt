@@ -1,0 +1,14 @@
+# Edge Device Dependencies (lightweight for IoT)
+# Compatible with Raspberry Pi, Jetson Nano, Android (via Termux)
+
+numpy>=1.26.4
+opencv-python-headless>=4.10.0
+requests>=2.31.0
+paho-mqtt>=2.0.0
+
+# Face recognition — auto-selects buffalo_s (lightweight) or buffalo_l (full)
+insightface>=0.7.3
+onnxruntime>=1.18.0
+
+# System info
+psutil>=6.0.0

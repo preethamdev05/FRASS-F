@@ -1,0 +1,22 @@
+{
+  "device_id": "edge-001",
+  "backend_url": "http://localhost:8000",
+  "mqtt_broker": "localhost",
+  "mqtt_port": 1883,
+  "mqtt_topic_prefix": "fras",
+  "camera_device": 0,
+  "camera_fps": 15,
+  "camera_width": 640,
+  "camera_height": 480,
+  "frame_skip": 2,
+  "model_type": "auto",
+  "face_det_size": 480,
+  "recognition_threshold": 0.65,
+  "liveness_threshold": 0.65,
+  "anti_spoof_model": "",
+  "offline_queue_max": 1000,
+  "sync_interval": 30,
+  "config_poll_interval": 60,
+  "tls_enabled": false,
+  "api_key": ""
+}

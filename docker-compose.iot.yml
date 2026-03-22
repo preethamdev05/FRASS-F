@@ -1,0 +1,92 @@
+# ─── IoT Face Recognition Attendance System ───
+# Distributed deployment: edge devices + backend + MQTT broker
+
+services:
+  # ─── Backend (Processing Layer) ───
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://faceapp:${POSTGRES_PASSWORD:-faceapp123}@db:5432/iot_attendance
+      - REDIS_URL=redis://redis:6379/1
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY}
+      - RECOGNITION_THRESHOLD=0.65
+      - LIVENESS_THRESHOLD=0.65
+      - DEDUP_COOLDOWN=300
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      start-period: 15s
+      retries: 3
+
+  # ─── Edge Device 1 (default) ───
+  edge-001:
+    build:
+      context: ./edge
+      dockerfile: Dockerfile
+    environment:
+      - FRAS_DEVICE_ID=edge-001
+      - FRAS_BACKEND_URL=http://backend:8000
+      - FRAS_CAMERA_DEVICE=0
+      - FRAS_MODEL_TYPE=auto
+      - FRAS_MQTT_BROKER=mqtt
+      - FRAS_API_KEY=${EDGE_API_KEY:-edge-key-001}
+    devices:
+      - /dev/video0:/dev/video0  # USB camera passthrough
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── MQTT Broker ───
+  mqtt:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    restart: unless-stopped
+
+  # ─── Database ───
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: iot_attendance
+      POSTGRES_USER: faceapp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-faceapp123}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U faceapp -d iot_attendance"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ─── Redis ───
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redis_data:
