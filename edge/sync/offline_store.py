@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import time
+from collections import deque
 
 logger = logging.getLogger(__name__)
 
@@ -17,18 +18,15 @@ class OfflineStore:
     def __init__(self, config):
         self._path = config.get('offline_store_path', 'offline_queue.jsonl')
         self._max_size = config.get('offline_queue_max', 1000)
-        self._queue: list = []
+        self._queue: deque = deque()
         self._load()
 
     def queue(self, result: dict):
         """Add a result to the offline queue."""
         if len(self._queue) >= self._max_size:
-            self._queue.pop(0)  # Drop oldest
+            self._queue.popleft()  # Drop oldest
         self._queue.append(result)
-
-        # Periodically flush to disk
-        if len(self._queue) % 50 == 0:
-            self.save()
+        self.save()
 
     def queue_size(self) -> int:
         return len(self._queue)
@@ -42,11 +40,13 @@ class OfflineStore:
         sent = 0
 
         while self._queue:
-            batch = self._queue[:batch_size]
+            batch = [self._queue.popleft() for _ in range(min(batch_size, len(self._queue)))]
             if sync_client.send_batch(batch):
-                self._queue = self._queue[batch_size:]
                 sent += len(batch)
             else:
+                # Put unsent items back at front
+                for item in reversed(batch):
+                    self._queue.appendleft(item)
                 break
 
         if sent > 0:

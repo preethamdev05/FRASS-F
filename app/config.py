@@ -1,18 +1,14 @@
 """Application configuration."""
 
 import os
-import secrets
 from datetime import timedelta
 
-
-def _generate_secret(length: int = 64) -> str:
-    """Generate a cryptographically secure secret key."""
-    return secrets.token_urlsafe(length)
+_DEV_FALLBACK_SECRET = 'dev-insecure-fallback-key-do-not-use-in-production'
 
 
 class Config:
     """Base configuration."""
-    SECRET_KEY = os.environ.get('SECRET_KEY', _generate_secret())
+    SECRET_KEY = os.environ.get('SECRET_KEY', _DEV_FALLBACK_SECRET)
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', 'sqlite:///attendance.db')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
@@ -22,7 +18,7 @@ class Config:
     }
 
     # JWT — RS256-compatible key length
-    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', _generate_secret())
+    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', _DEV_FALLBACK_SECRET)
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=1)
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
     JWT_TOKEN_LOCATION = ['headers', 'cookies']
@@ -55,7 +51,7 @@ class Config:
     DEFAULT_GRACE_PERIOD = 5  # minutes
 
     # CORS
-    CORS_ORIGINS = os.environ.get('CORS_ORIGINS', '*').split(',')
+    CORS_ORIGINS = [o.strip() for o in os.environ.get('CORS_ORIGINS', '*').split(',')]
 
     # Account Lockout
     MAX_LOGIN_ATTEMPTS = int(os.environ.get('MAX_LOGIN_ATTEMPTS', '5'))
@@ -73,6 +69,9 @@ class Config:
 class DevelopmentConfig(Config):
     DEBUG = True
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', 'sqlite:///attendance.db')
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_pre_ping': True,
+    }
     RATELIMIT_STORAGE_URI = 'memory://'
     METRICS_ENABLED = False
     LOG_FORMAT = 'text'
@@ -80,14 +79,15 @@ class DevelopmentConfig(Config):
 
 class ProductionConfig(Config):
     DEBUG = False
-    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL')
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', '')
     RATELIMIT_STORAGE_URI = os.environ.get('REDIS_URL', 'redis://redis:6379/0')
     JWT_COOKIE_SECURE = True
 
-    def __init__(self):
+    @classmethod
+    def validate(cls):
         for var in ('SECRET_KEY', 'JWT_SECRET_KEY'):
             val = os.environ.get(var)
-            if not val or val == 'change-me-in-production':
+            if not val or val == 'change-me-in-production' or val == _DEV_FALLBACK_SECRET:
                 raise ValueError(f'{var} must be set to a secure value in production')
         if not os.environ.get('DATABASE_URL'):
             raise ValueError('DATABASE_URL must be set in production')

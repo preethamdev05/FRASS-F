@@ -6,6 +6,7 @@ Optimized for low-power hardware (RPi, Jetson Nano).
 
 import logging
 import time
+from typing import Optional
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ class InferencePipeline:
                     model_type = 'full'
                 else:
                     model_type = 'lightweight'
-            except ImportError:
+            except Exception:
                 model_type = 'lightweight'
 
         try:
@@ -64,7 +65,7 @@ class InferencePipeline:
             except Exception as e:
                 logger.warning('Anti-spoof model not loaded: %s', e)
 
-    def process(self, frame: np.ndarray) -> dict | None:
+    def process(self, frame: np.ndarray) -> Optional[dict]:
         """Process a single frame through the full pipeline.
 
         Returns:

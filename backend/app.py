@@ -27,6 +27,17 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
 logger = logging.getLogger(__name__)
 
+def _parse_api_keys(raw):
+    """Parse API_KEYS env var, falling back to empty dict on invalid JSON."""
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        logger.warning('Invalid API_KEYS env var, using empty dict')
+        return {}
+
+
 app = Flask(__name__)
 app.config.update(
     SECRET_KEY=os.environ.get('SECRET_KEY', 'iot-backend-secret'),
@@ -37,7 +48,7 @@ app.config.update(
     RECOGNITION_THRESHOLD=float(os.environ.get('RECOGNITION_THRESHOLD', '0.65')),
     LIVENESS_THRESHOLD=float(os.environ.get('LIVENESS_THRESHOLD', '0.65')),
     DEDUP_COOLDOWN=int(os.environ.get('DEDUP_COOLDOWN', '300')),
-    API_KEYS=json.loads(os.environ.get('API_KEYS', '{}')),
+    API_KEYS=_parse_api_keys(os.environ.get('API_KEYS')),
     MIN_EMBEDDING_QUALITY=float(os.environ.get('MIN_EMBEDDING_QUALITY', '0.85')),
 )
 
@@ -68,7 +79,9 @@ def require_api_key(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         api_key = request.headers.get('X-API-Key', '')
-        device_id = request.headers.get('X-Device-ID', request.json.get('device_id', '') if request.is_json else '')
+        device_id = request.headers.get('X-Device-ID', '')
+        if not device_id and request.is_json and request.json:
+            device_id = request.json.get('device_id', '')
 
         if not api_key:
             return jsonify(error='X-API-Key header required'), 401
@@ -257,9 +270,14 @@ def _match_pgvector(query: np.ndarray, threshold: float) -> tuple:
         return None, 0.0
 
 
-# ─── Replay Prevention (with TTL cleanup) ───
+# ─── Replay Prevention (with periodic TTL cleanup) ───
+
+_last_replay_cleanup = 0
+REPLAY_CLEANUP_INTERVAL = 300  # seconds
+
 
 def check_replay(nonce: str, device_id: str) -> bool:
+    global _last_replay_cleanup
     if not nonce:
         return False
     existing = ReplayGuard.query.get(nonce)
@@ -268,13 +286,16 @@ def check_replay(nonce: str, device_id: str) -> bool:
     db.session.add(ReplayGuard(nonce=nonce, device_id=device_id))
     db.session.commit()
 
-    # Periodic cleanup: delete nonces older than 1 hour
-    try:
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
-        ReplayGuard.query.filter(ReplayGuard.timestamp < cutoff).delete()
-        db.session.commit()
-    except Exception:
-        pass
+    # Periodic cleanup: delete nonces older than 1 hour (every 5 min)
+    now = time.time()
+    if now - _last_replay_cleanup >= REPLAY_CLEANUP_INTERVAL:
+        _last_replay_cleanup = now
+        try:
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+            ReplayGuard.query.filter(ReplayGuard.timestamp < cutoff).delete()
+            db.session.commit()
+        except Exception:
+            pass
     return True
 
 
@@ -578,8 +599,10 @@ def get_attendance():
     user_id = request.args.get('user_id', type=int)
 
     query = AttendanceLog.query
-    query = query.filter(AttendanceLog.timestamp >= f'{start}T00:00:00')
-    query = query.filter(AttendanceLog.timestamp <= f'{end}T23:59:59')
+    start_dt = datetime.fromisoformat(f'{start}T00:00:00').replace(tzinfo=timezone.utc)
+    end_dt = datetime.fromisoformat(f'{end}T23:59:59').replace(tzinfo=timezone.utc)
+    query = query.filter(AttendanceLog.timestamp >= start_dt)
+    query = query.filter(AttendanceLog.timestamp <= end_dt)
     if device_id:
         query = query.filter_by(device_id=device_id)
     if user_id:

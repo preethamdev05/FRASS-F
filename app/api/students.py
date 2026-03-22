@@ -58,6 +58,7 @@ def create_student():
         semester=data.get('semester'),
     )
     db.session.add(student)
+    db.session.flush()
 
     # Audit
     identity = get_jwt_identity()
@@ -147,7 +148,7 @@ def register_face():
     student_db_id = data.get('student_id')
     image_b64 = data.get('image')
 
-    if not student_db_id or not image_b64:
+    if student_db_id is None or not image_b64:
         return jsonify(error='student_id and image are required'), 400
 
     student = db.session.get(Student, student_db_id)
@@ -175,6 +176,9 @@ def register_face():
     import numpy as np
     nparr = np.frombuffer(img_bytes, np.uint8)
     frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+    if frame is None:
+        return jsonify(error='Could not decode image'), 400
 
     photo_index = student.photo_count + 1
     from app.services.storage import StorageService

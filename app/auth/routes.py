@@ -58,10 +58,8 @@ def _record_failed_redis(username: str):
         pipe = r.pipeline()
         pipe.hincrby(key, 'attempts', 1)
         pipe.hset(key, 'last_attempt', str(time.time()))
-        # Set TTL on first attempt
-        if not r.exists(key):
-            pipe.expire(key, 300)  # 5 minutes
         pipe.execute()
+        r.expire(key, 300)  # Always refresh TTL
     except Exception:
         pass
 
@@ -107,8 +105,8 @@ def login():
     if not data:
         return jsonify(error='Missing credentials'), 400
 
-    username = data.get('username', '').strip()
-    password = data.get('password', '')
+    username = (data.get('username') or '').strip()
+    password = (data.get('password') or '')
     mfa_code = data.get('mfa_code')
 
     if not username or not password:
@@ -133,6 +131,7 @@ def login():
         remaining = int((user.locked_until - datetime.now(timezone.utc)).total_seconds())
         return jsonify(error=f'Account locked. Try again in {max(remaining, 1)} seconds.'), 429
 
+    # Check is_active before MFA so inactive users don't get prompted for MFA
     if not user.is_active:
         return jsonify(error='Account disabled'), 403
 
@@ -289,9 +288,9 @@ def register():
     if not data:
         return jsonify(error='Missing data'), 400
 
-    username = data.get('username', '').strip()
-    password = data.get('password', '')
-    email = data.get('email', '').strip() or None
+    username = (data.get('username') or '').strip()
+    password = (data.get('password') or '')
+    email = (data.get('email') or '').strip() or None
     role = data.get('role', 'teacher')
 
     if not username or not password:
@@ -311,6 +310,7 @@ def register():
     user.set_password(password)
 
     db.session.add(user)
+    db.session.flush()
 
     # Audit
     identity = get_jwt_identity()
@@ -329,9 +329,11 @@ def change_password():
     identity = get_jwt_identity()
     user = db.session.get(User, int(identity))
     data = request.json
+    if not data:
+        return jsonify(error='Missing data'), 400
 
-    old_password = data.get('old_password', '')
-    new_password = data.get('new_password', '')
+    old_password = (data.get('old_password') or '')
+    new_password = (data.get('new_password') or '')
 
     if not user.check_password(old_password):
         return jsonify(error='Current password incorrect'), 400

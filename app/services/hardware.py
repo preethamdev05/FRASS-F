@@ -112,9 +112,9 @@ class HardwareProfile:
 
     def tier(self) -> str:
         """Classify hardware into tiers."""
-        if self.gpu_type in ('nvidia_cuda', 'apple_metal') and self.gpu_vram_gb >= 6:
+        if self.gpu_type in ('nvidia_cuda', 'apple_metal', 'amd_rocm') and self.gpu_vram_gb >= 6:
             return 'high_gpu'
-        elif self.gpu_type in ('nvidia_cuda', 'apple_metal') and self.gpu_vram_gb >= 2:
+        elif self.gpu_type in ('nvidia_cuda', 'apple_metal', 'amd_rocm') and self.gpu_vram_gb >= 2:
             return 'mid_gpu'
         elif self.gpu_type == 'intel_igpu':
             return 'igpu'
@@ -206,6 +206,14 @@ class HardwareProfile:
             ]
         elif self.gpu_type == 'apple_metal':
             return ['CoreMLExecutionProvider', 'CPUExecutionProvider']
+        elif self.gpu_type == 'amd_rocm':
+            return [
+                ('ROCMExecutionProvider', {
+                    'device_id': 0,
+                    'arena_extend_strategy': 'kSameAsRequested',
+                }),
+                'CPUExecutionProvider',
+            ]
         return self._cpu_providers()
 
     def _igpu_providers(self):

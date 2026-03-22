@@ -1,5 +1,6 @@
 """Schedule API routes."""
 
+import re
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required
 from app.extensions import db
@@ -7,6 +8,24 @@ from app.models.schedule import Schedule
 from app.auth.decorators import role_required
 
 schedules_bp = Blueprint('schedules_api', __name__)
+
+_TIME_RE = re.compile(r'^([01]\d|2[0-3]):[0-5]\d$')
+
+
+def _validate_time(value, field_name):
+    """Validate HH:MM time format."""
+    if not _TIME_RE.match(value):
+        return f'{field_name} must be in HH:MM format'
+    return None
+
+
+def _clamp_threshold(value):
+    """Cast to int and clamp between 0 and 480 (8 hours)."""
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        v = 10
+    return max(0, min(v, 480))
 
 
 @schedules_bp.route('', methods=['GET'])
@@ -34,13 +53,20 @@ def create_schedule():
     if not name or not start_time or not end_time:
         return jsonify(error='name, start_time, and end_time are required'), 400
 
+    err = _validate_time(start_time, 'start_time')
+    if err:
+        return jsonify(error=err), 400
+    err = _validate_time(end_time, 'end_time')
+    if err:
+        return jsonify(error=err), 400
+
     schedule = Schedule(
         name=name,
         department=data.get('department'),
         start_time=start_time,
         end_time=end_time,
-        late_threshold=data.get('late_threshold', 10),
-        grace_period=data.get('grace_period', 5),
+        late_threshold=_clamp_threshold(data.get('late_threshold', 10)),
+        grace_period=_clamp_threshold(data.get('grace_period', 5)),
     )
     schedule.days_list = days if days else [0, 1, 2, 3]
 
@@ -60,18 +86,26 @@ def update_schedule(sid):
         return jsonify(error='Schedule not found'), 404
 
     data = request.json
+    if not data:
+        return jsonify(error='Missing data'), 400
     if 'name' in data:
         schedule.name = data['name'].strip()
     if 'department' in data:
         schedule.department = data['department']
     if 'start_time' in data:
+        err = _validate_time(data['start_time'], 'start_time')
+        if err:
+            return jsonify(error=err), 400
         schedule.start_time = data['start_time']
     if 'end_time' in data:
+        err = _validate_time(data['end_time'], 'end_time')
+        if err:
+            return jsonify(error=err), 400
         schedule.end_time = data['end_time']
     if 'late_threshold' in data:
-        schedule.late_threshold = data['late_threshold']
+        schedule.late_threshold = _clamp_threshold(data['late_threshold'])
     if 'grace_period' in data:
-        schedule.grace_period = data['grace_period']
+        schedule.grace_period = _clamp_threshold(data['grace_period'])
     if 'days_of_week' in data:
         schedule.days_list = data['days_of_week']
     if 'is_active' in data:

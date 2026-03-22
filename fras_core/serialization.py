@@ -14,7 +14,10 @@ def serialize_embedding(embedding: np.ndarray) -> bytes:
 
 def deserialize_embedding(blob: bytes) -> np.ndarray:
     """Deserialize a single embedding from bytes (safe, no pickle)."""
-    return np.frombuffer(blob, dtype=EMBEDDING_DTYPE).copy()
+    arr = np.frombuffer(blob, dtype=EMBEDDING_DTYPE).copy()
+    if len(arr) != EMBEDDING_DIM:
+        raise ValueError(f'Expected embedding of dimension {EMBEDDING_DIM}, got {len(arr)}')
+    return arr
 
 
 def serialize_encodings(encodings: dict[int, list[np.ndarray]]) -> str:

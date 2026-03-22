@@ -1,6 +1,7 @@
 """Flask extensions initialization."""
 
 import logging
+from typing import Optional
 import redis as redis_lib
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -24,17 +25,32 @@ def _rate_limit_key():
     return get_remote_address()
 
 
+def _detect_async_mode():
+    """Auto-detect SocketIO async mode based on available libraries."""
+    try:
+        import gevent  # noqa: F401
+        return 'gevent'
+    except ImportError:
+        pass
+    try:
+        import eventlet  # noqa: F401
+        return 'eventlet'
+    except ImportError:
+        pass
+    return 'threading'
+
+
 db = SQLAlchemy()
 migrate = Migrate()
 jwt = JWTManager()
-socketio = SocketIO(cors_allowed_origins='*', async_mode='gevent')
+socketio = SocketIO(cors_allowed_origins='*', async_mode=_detect_async_mode())
 limiter = Limiter(key_func=_rate_limit_key, default_limits=['100/minute'])
 
 # Redis client — initialized lazily in create_app
-redis_client: redis_lib.Redis | None = None
+redis_client: Optional[redis_lib.Redis] = None
 
 
-def get_redis() -> redis_lib.Redis | None:
+def get_redis() -> Optional[redis_lib.Redis]:
     """Get the Redis client instance, or None if unavailable."""
     return redis_client
 
@@ -54,4 +70,16 @@ def init_redis(app):
         app.logger.info('Redis connected: %s', app.config['REDIS_URL'])
     except Exception as e:
         app.logger.warning('Redis unavailable (%s), falling back to in-memory', e)
+        redis_client = None
+
+
+def close_redis(app):
+    """Close the Redis connection if it exists."""
+    global redis_client
+    if redis_client is not None:
+        try:
+            redis_client.close()
+            app.logger.info('Redis connection closed')
+        except Exception as e:
+            app.logger.warning('Error closing Redis connection: %s', e)
         redis_client = None

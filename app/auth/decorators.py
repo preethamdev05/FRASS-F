@@ -2,8 +2,11 @@
 
 from functools import wraps
 from flask import jsonify
-from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
+from flask_jwt_extended import (
+    get_jwt_identity, verify_jwt_in_request
+)
 from app.models.user import User
+from app.extensions import jwt
 
 
 def role_required(*roles):
@@ -33,6 +36,19 @@ def get_current_user():
 
 def register_jwt_handlers(app):
     """Register JWT error handlers."""
+    jwt.init_app(app)
+
+    @jwt.expired_token_loader
+    def expired_token_callback(jwt_header, jwt_payload):
+        return jsonify(error='Token has expired'), 401
+
+    @jwt.invalid_token_loader
+    def invalid_token_callback(error):
+        return jsonify(error='Invalid token'), 401
+
+    @jwt.unauthorized_loader
+    def missing_token_callback(error):
+        return jsonify(error='Authorization required'), 401
 
     @app.errorhandler(404)
     def not_found(e):

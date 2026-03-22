@@ -21,8 +21,14 @@ def export_csv():
     end = request.args.get('end', date.today().isoformat())
     student_id = request.args.get('student_id', type=int)
 
+    try:
+        start_date = date.fromisoformat(start)
+        end_date = date.fromisoformat(end)
+    except ValueError:
+        return jsonify(error='Invalid date format. Use YYYY-MM-DD.'), 400
+
     records = svc.get_attendance_range(
-        date.fromisoformat(start), date.fromisoformat(end), student_id
+        start_date, end_date, student_id
     )
 
     csv_data = export_svc.generate_csv(records)
@@ -43,8 +49,14 @@ def export_pdf():
     end = request.args.get('end', date.today().isoformat())
     student_id = request.args.get('student_id', type=int)
 
+    try:
+        start_date = date.fromisoformat(start)
+        end_date = date.fromisoformat(end)
+    except ValueError:
+        return jsonify(error='Invalid date format. Use YYYY-MM-DD.'), 400
+
     records = svc.get_attendance_range(
-        date.fromisoformat(start), date.fromisoformat(end), student_id
+        start_date, end_date, student_id
     )
 
     # Compute summary

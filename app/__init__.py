@@ -2,13 +2,15 @@
 
 import os
 import sys
+import time
 import logging
 from flask import Flask, jsonify, g, request
 from flask_cors import CORS
+from sqlalchemy import text
 from dotenv import load_dotenv
 
 from app.config import config
-from app.extensions import db, migrate, jwt, socketio, limiter, init_redis
+from app.extensions import db, migrate, jwt, socketio, limiter, init_redis, close_redis
 
 load_dotenv()
 
@@ -73,15 +75,15 @@ def _setup_metrics(app):
                 try:
                     pool_checked_out.set(connection_rec._pool.checkedout())
                     pool_size_gauge.set(connection_rec._pool.size())
-                except Exception:
-                    pass
+                except Exception as exc:
+                    app.logger.debug('Pool checkout metrics error: %s', exc)
 
             @event.listens_for(engine, 'checkin')
             def _on_checkin(dbapi_conn, connection_rec):
                 try:
                     pool_checked_out.set(connection_rec._pool.checkedout())
-                except Exception:
-                    pass
+                except Exception as exc:
+                    app.logger.debug('Pool checkin metrics error: %s', exc)
         except Exception:
             pass
 
@@ -113,12 +115,21 @@ def create_app(config_name=None):
     if config_name is None:
         config_name = os.environ.get('FLASK_ENV', 'development')
 
+    config_class = config.get(config_name)
+    if config_class is None:
+        config_name = 'development'
+        config_class = config[config_name]
+
     app = Flask(
         __name__,
         template_folder='templates',
         static_folder='static',
     )
-    app.config.from_object(config[config_name])
+    app.config.from_object(config_class)
+
+    # Validate production config
+    if config_name == 'production':
+        config_class.validate()
 
     # Setup logging first so subsequent init messages are structured
     _setup_logging(app)
@@ -137,6 +148,13 @@ def create_app(config_name=None):
     # Redis (graceful fallback if unavailable)
     init_redis(app)
 
+    # Clean up Redis on app teardown
+    @app.teardown_appcontext
+    def _teardown_redis(exception):
+        pass
+
+    app.teardown_appcontext_funcs.append(lambda exc: close_redis(app))
+
     # Prometheus metrics
     _setup_metrics(app)
 
@@ -151,7 +169,7 @@ def create_app(config_name=None):
     # Request timing middleware
     @app.before_request
     def _start_timer():
-        g.request_start_time = __import__('time').time()
+        g.request_start_time = time.time()
 
     # Security headers middleware
     @app.after_request
@@ -173,7 +191,7 @@ def create_app(config_name=None):
 
         # Database check
         try:
-            db.session.execute(db.text('SELECT 1'))
+            db.session.execute(text('SELECT 1'))
             checks['database'] = 'ok'
         except Exception as e:
             checks['database'] = f'error: {str(e)}'

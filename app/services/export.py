@@ -2,10 +2,13 @@
 
 import io
 import csv
+import html
 import logging
 from datetime import date
 
 logger = logging.getLogger(__name__)
+
+_DASH = '\u2014'
 
 
 def generate_csv(records: list) -> str:
@@ -47,16 +50,24 @@ def generate_pdf(records: list, summary: dict, title: str = 'Attendance Report')
 
     rows_html = ''
     for r in records:
+        sid = html.escape(str(r.get('sid', '')))
+        name = html.escape(str(r.get('name', '')))
+        dept = html.escape(str(r.get('department', _DASH)))
+        rec_date = html.escape(str(r.get('date', '')))
+        time_in = html.escape(str(r.get('time_in', '')))
+        status = html.escape(str(r.get('status', '')))
+        conf = html.escape(str(r.get('confidence', _DASH)))
+        method = html.escape(str(r.get('method', '')))
         rows_html += f"""
         <tr>
-            <td>{r.get('sid', '')}</td>
-            <td>{r.get('name', '')}</td>
-            <td>{r.get('department', '—')}</td>
-            <td>{r.get('date', '')}</td>
-            <td>{r.get('time_in', '')}</td>
-            <td>{r.get('status', '')}</td>
-            <td>{r.get('confidence', '—')}</td>
-            <td>{r.get('method', '')}</td>
+            <td>{sid}</td>
+            <td>{name}</td>
+            <td>{dept}</td>
+            <td>{rec_date}</td>
+            <td>{time_in}</td>
+            <td>{status}</td>
+            <td>{conf}</td>
+            <td>{method}</td>
         </tr>"""
 
     html_content = f"""
@@ -77,7 +88,7 @@ def generate_pdf(records: list, summary: dict, title: str = 'Attendance Report')
         </style>
     </head>
     <body>
-        <h1>🎓 {title}</h1>
+        <h1>\U0001f393 {html.escape(title)}</h1>
         <p>Generated: {today}</p>
 
         <div class="summary">

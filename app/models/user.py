@@ -3,6 +3,12 @@
 from datetime import datetime, timezone
 from app.extensions import db
 
+try:
+    from argon2 import PasswordHasher as _PasswordHasher
+    _ph = _PasswordHasher(time_cost=3, memory_cost=65536, parallelism=4)
+except ImportError:
+    _ph = None
+
 
 class User(db.Model):
     __tablename__ = 'users'
@@ -31,33 +37,23 @@ class User(db.Model):
 
     def set_password(self, password: str):
         """Hash password using argon2id (falls back to werkzeug if unavailable)."""
-        try:
-            from argon2 import PasswordHasher
-            ph = PasswordHasher(
-                time_cost=3,
-                memory_cost=65536,
-                parallelism=4,
-            )
-            self.password_hash = ph.hash(password)
-        except ImportError:
+        if _ph is not None:
+            self.password_hash = _ph.hash(password)
+        else:
             from werkzeug.security import generate_password_hash
             self.password_hash = generate_password_hash(password)
 
     def check_password(self, password: str) -> bool:
         """Verify password against stored hash."""
-        try:
-            from argon2 import PasswordHasher
+        if _ph is not None:
             from argon2.exceptions import VerifyMismatchError, InvalidHashError
-            ph = PasswordHasher()
             try:
-                return ph.verify(self.password_hash, password)
+                return _ph.verify(self.password_hash, password)
             except VerifyMismatchError:
                 return False
             except InvalidHashError:
                 # Hash was created by werkzeug — fall through
                 pass
-        except ImportError:
-            pass
 
         # Fallback: werkzeug hash
         try:
@@ -74,7 +70,6 @@ class User(db.Model):
             # Lockout expired — reset
             self.failed_login_attempts = 0
             self.locked_until = None
-            db.session.commit()
         return False
 
     def record_failed_login(self, max_attempts: int = 5, lockout_seconds: int = 300):

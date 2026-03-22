@@ -6,6 +6,7 @@ Cross-worker: Redis version key polled every 2s by engine.py listener.
 
 import logging
 import struct
+import threading
 from typing import Optional, Tuple
 
 import numpy as np
@@ -31,6 +32,7 @@ class FaceEngine:
         self._app = None
         self._known_encodings: dict[int, list[np.ndarray]] = {}
         self._cache_version = 0
+        self._lock = threading.Lock()
 
     @property
     def app(self):
@@ -109,14 +111,16 @@ class FaceEngine:
 
     def save_encoding(self, student_db_id: int, encoding: np.ndarray, photo_path: str = None):
         """Save encoding to in-memory cache and Redis."""
-        if student_db_id not in self._known_encodings:
-            self._known_encodings[student_db_id] = []
-        self._known_encodings[student_db_id].append(encoding)
+        with self._lock:
+            if student_db_id not in self._known_encodings:
+                self._known_encodings[student_db_id] = []
+            self._known_encodings[student_db_id].append(encoding)
         self._sync_to_redis()
 
     def load_all_encodings(self):
         """Load encodings from Redis cache, falling back to database."""
-        self._known_encodings = {}
+        with self._lock:
+            self._known_encodings = {}
 
         # Try Redis first
         if self._load_from_redis():
@@ -194,7 +198,8 @@ class FaceEngine:
                 r.incr(ENCODING_VERSION_KEY)
         except Exception:
             pass
-        self._known_encodings = {}
+        with self._lock:
+            self._known_encodings = {}
 
     def recognize_face(self, encoding: np.ndarray, tolerance: float = 0.5) -> Tuple[Optional[int], float]:
         """Match a face encoding against known encodings.
@@ -242,13 +247,15 @@ class FaceEngine:
 
     def _recognize_linear(self, encoding: np.ndarray, tolerance: float) -> Tuple[Optional[int], float]:
         """In-memory O(n) cosine similarity scan."""
-        if not self._known_encodings:
+        with self._lock:
+            encodings_snapshot = {k: list(v) for k, v in self._known_encodings.items()}
+        if not encodings_snapshot:
             return None, 0.0
 
         best_id = None
         best_score = 0.0
 
-        for student_db_id, encodings in self._known_encodings.items():
+        for student_db_id, encodings in encodings_snapshot.items():
             for known_enc in encodings:
                 similarity = float(np.dot(encoding, known_enc))
                 if similarity > best_score:
@@ -270,7 +277,8 @@ class FaceEngine:
         from app.models.face import FaceEncoding
         from app.extensions import db
 
-        self._known_encodings.pop(student_db_id, None)
+        with self._lock:
+            self._known_encodings.pop(student_db_id, None)
         FaceEncoding.query.filter_by(student_id=student_db_id).delete()
         db.session.commit()
         self._sync_to_redis()
@@ -319,6 +327,8 @@ def _deserialize_encodings(data: str) -> dict[int, list[np.ndarray]] | None:
             enc_list = []
             for _ in range(enc_count):
                 byte_size = EMBEDDING_DIM * 4  # float32 = 4 bytes
+                if offset + byte_size > len(buf):
+                    raise ValueError('Buffer too short for encoding data')
                 enc = np.frombuffer(buf, dtype=EMBEDDING_DTYPE, count=EMBEDDING_DIM, offset=offset)
                 enc_list.append(enc.copy())
                 offset += byte_size

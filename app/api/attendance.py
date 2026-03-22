@@ -2,6 +2,7 @@
 
 import base64
 import concurrent.futures
+import threading
 import numpy as np
 from datetime import date
 
@@ -18,8 +19,7 @@ attendance_bp = Blueprint('attendance_api', __name__)
 # Capped thread pool — 2 workers max per gunicorn process to prevent OOM
 # Each InsightFace inference uses ~500MB RAM; 4 workers × 4 threads = 16GB is too much
 _thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
-_inference_in_progress = 0
-_max_concurrent_inferences = 2
+_inference_semaphore = threading.Semaphore(2)
 
 
 @attendance_bp.route('/start', methods=['POST'])
@@ -174,16 +174,14 @@ def recognize():
 
     # Offload CPU-heavy ML to thread pool to avoid blocking the event loop
     # Backpressure: reject if all inference slots are busy
-    global _inference_in_progress
-    if _inference_in_progress >= _max_concurrent_inferences:
+    if not _inference_semaphore.acquire(blocking=False):
         return jsonify(error='Server busy, try again in a moment'), 429
 
-    _inference_in_progress += 1
     try:
         future = _thread_pool.submit(_process_frame, frame, engine, liveness, session)
         recognized, newly_marked = future.result(timeout=30)
     finally:
-        _inference_in_progress -= 1
+        _inference_semaphore.release()
 
     total_marked = AttendanceRecord.query.filter_by(session_id=session.id).count()
 
@@ -232,9 +230,11 @@ def range_query():
     end = request.args.get('end', date.today().isoformat())
     student_id = request.args.get('student_id', type=int)
 
-    from datetime import date as d
-    start_date = d.fromisoformat(start)
-    end_date = d.fromisoformat(end)
+    try:
+        start_date = date.fromisoformat(start)
+        end_date = date.fromisoformat(end)
+    except ValueError:
+        return jsonify(error='Invalid date format. Use YYYY-MM-DD.'), 400
 
     records = svc.get_attendance_range(start_date, end_date, student_id)
     return jsonify(records)

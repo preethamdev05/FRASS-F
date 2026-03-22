@@ -21,6 +21,8 @@ class AttendanceSession(db.Model):
     starter = db.relationship('User', backref='sessions_started')
 
     def to_dict(self):
+        record_count = db.session.query(db.func.count(AttendanceRecord.id))\
+            .filter(AttendanceRecord.session_id == self.id).scalar()
         return {
             'id': self.id,
             'started_by': self.started_by,
@@ -29,7 +31,7 @@ class AttendanceSession(db.Model):
             'status': self.status,
             'started_at': self.started_at.isoformat() if self.started_at else None,
             'ended_at': self.ended_at.isoformat() if self.ended_at else None,
-            'record_count': self.records.count(),
+            'record_count': record_count,
         }
 
 

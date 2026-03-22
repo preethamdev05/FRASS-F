@@ -100,6 +100,11 @@ class LivenessDetector:
             'ml_antispoof': 0.25,  # ML model gets highest single weight
         }
         if enabled_layers:
+            valid_keys = set(self.weights.keys())
+            invalid_keys = set(enabled_layers) - valid_keys
+            if invalid_keys:
+                logger.warning('Unknown enabled_layers keys: %s', invalid_keys)
+            enabled_layers = [k for k in enabled_layers if k in valid_keys]
             total = sum(self.weights[k] for k in enabled_layers)
             self.weights = {k: self.weights[k] / total for k in enabled_layers}
         self.enabled = enabled_layers or list(self.weights.keys())
@@ -118,6 +123,9 @@ class LivenessDetector:
         scores = {}
         reasons = []
 
+        enabled = list(self.enabled)
+        weights = dict(self.weights)
+
         # Image quality check (always run first — reject bad images early)
         quality = check_face_quality(face_roi)
         if not quality.quality_pass:
@@ -129,43 +137,43 @@ class LivenessDetector:
                 quality={'blur': quality.blur_score, 'brightness': quality.brightness},
             )
 
-        if 'quality' in self.enabled:
+        if 'quality' in enabled:
             q_score = min(1.0, quality.blur_score / 200.0) * 0.5
             q_score += 0.5 if quality.quality_pass else 0.0
             scores['quality'] = q_score
 
-        if 'texture' in self.enabled:
+        if 'texture' in enabled:
             s = self._check_texture(face_roi)
             scores['texture'] = s
             if s < 0.3:
                 reasons.append('low texture variance (possible printed photo)')
 
-        if 'moire' in self.enabled:
+        if 'moire' in enabled:
             s = self._check_moire(face_roi)
             scores['moire'] = s
             if s < 0.3:
                 reasons.append('moire patterns detected (possible screen)')
 
-        if 'depth' in self.enabled and landmarks is not None:
+        if 'depth' in enabled and landmarks is not None:
             s = self._check_depth(landmarks)
             scores['depth'] = s
             if s < 0.3:
                 reasons.append('flat face geometry (possible 2D photo)')
 
-        if 'blink' in self.enabled:
+        if 'blink' in enabled:
             s = self._check_blink(face_roi, landmarks)
             scores['blink'] = s
             if s < 0.3:
                 reasons.append('no eye blinks detected (possible photo)')
 
-        if 'colorspace' in self.enabled:
+        if 'colorspace' in enabled:
             s = self._check_colorspace(face_roi)
             scores['colorspace'] = s
             if s < 0.3:
                 reasons.append('abnormal skin color distribution')
 
         # ML anti-spoofing (runs alongside heuristics)
-        if 'ml_antispoof' in self.enabled:
+        if 'ml_antispoof' in enabled:
             if self._antispoof is None:
                 from app.services.antispoof import AntiSpoofDetector
                 self._antispoof = AntiSpoofDetector(model_path=self._antispoof_path)
@@ -174,15 +182,15 @@ class LivenessDetector:
             if ml_score >= 0:
                 scores['ml_antispoof'] = ml_score
                 if ml_score < 0.4:
-                    reasons.append(f'ML anti-spoof: spoof detected (score: {ml_score:.2f})')
+                    reasons.append('ML anti-spoof: spoof detected (score: %.2f)' % ml_score)
             else:
                 # Model unavailable — redistribute weight to heuristics
-                self.enabled = [k for k in self.enabled if k != 'ml_antispoof']
-                total = sum(self.weights[k] for k in self.enabled)
-                self.weights = {k: self.weights[k] / total for k in self.enabled}
+                enabled = [k for k in enabled if k != 'ml_antispoof']
+                total = sum(weights[k] for k in enabled)
+                weights = {k: weights[k] / total for k in enabled}
 
         # Weighted total
-        total = sum(scores.get(k, 0.5) * self.weights.get(k, 0) for k in self.enabled)
+        total = sum(scores.get(k, 0.5) * weights.get(k, 0) for k in enabled)
         is_live = total >= self.threshold
 
         reason = '; '.join(reasons) if reasons else 'all checks passed'
@@ -233,7 +241,7 @@ class LivenessDetector:
             return 0.4
 
         except Exception as e:
-            logger.debug(f'Texture check failed: {e}')
+            logger.debug('Texture check failed: %s', e)
             return 0.5
 
     def _check_moire(self, face_roi: np.ndarray) -> float:
@@ -274,7 +282,7 @@ class LivenessDetector:
             return 0.8
 
         except Exception as e:
-            logger.debug(f'Moire check failed: {e}')
+            logger.debug('Moire check failed: %s', e)
             return 0.5
 
     def _check_depth(self, landmarks: np.ndarray) -> float:
@@ -312,7 +320,7 @@ class LivenessDetector:
             return 0.5
 
         except Exception as e:
-            logger.debug(f'Depth check failed: {e}')
+            logger.debug('Depth check failed: %s', e)
             return 0.5
 
     def _check_blink(self, face_roi: np.ndarray, landmarks=None) -> float:
@@ -374,7 +382,7 @@ class LivenessDetector:
             return 0.6
 
         except Exception as e:
-            logger.debug(f'Blink check failed: {e}')
+            logger.debug('Blink check failed: %s', e)
             return 0.5
 
     def _check_colorspace(self, face_roi: np.ndarray) -> float:
@@ -401,7 +409,7 @@ class LivenessDetector:
             return 0.4
 
         except Exception as e:
-            logger.debug(f'Colorspace check failed: {e}')
+            logger.debug('Colorspace check failed: %s', e)
             return 0.5
 
     @staticmethod

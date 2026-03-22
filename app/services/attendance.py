@@ -164,7 +164,7 @@ def _compute_status(schedule: Schedule, marked_time: datetime) -> str:
         return 'present'
     elif marked_time <= late_dt + timedelta(minutes=schedule.grace_period):
         return 'late'
-    return 'late'
+    return 'absent'
 
 
 def get_today_attendance() -> list:

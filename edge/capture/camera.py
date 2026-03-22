@@ -34,7 +34,10 @@ class CameraStream:
             pipeline = f'nvarguscamerasrc ! video/x-raw(memory:NVMM), width={self._width}, height={self._height}, framerate={self._fps}/1 ! nvvidconv ! video/x-raw, format=BGRx ! videoconvert ! appsink'
             self._cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
         else:
-            self._cap = cv2.VideoCapture(int(source))
+            try:
+                self._cap = cv2.VideoCapture(int(source))
+            except (ValueError, TypeError):
+                self._cap = cv2.VideoCapture(str(source))
 
         if not self._cap.isOpened():
             raise RuntimeError(f'Cannot open camera: {source}')

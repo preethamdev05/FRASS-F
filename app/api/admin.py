@@ -1,7 +1,7 @@
 """Admin API routes."""
 
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import jwt_required, get_jwt_identity
 from app.extensions import db
 from app.models.user import User
 from app.models.audit import AuditLog
@@ -46,12 +46,20 @@ def update_user(uid):
 @role_required('admin')
 def delete_user(uid):
     """Delete a user."""
+    identity = int(get_jwt_identity())
+    if uid == identity:
+        return jsonify(error='Cannot delete your own account'), 400
+
     user = db.session.get(User, uid)
     if not user:
         return jsonify(error='User not found'), 404
 
-    db.session.delete(user)
-    db.session.commit()
+    try:
+        db.session.delete(user)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        return jsonify(error='Cannot delete user: related records exist'), 409
     return jsonify(status='deleted')
 
 

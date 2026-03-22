@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 @socketio.on('connect')
 def handle_connect():
     """Client connected."""
-    join_room('dashboard')
     logger.debug('Client connected to WebSocket')
 
 
@@ -23,17 +22,22 @@ def handle_disconnect():
 @socketio.on('join_session')
 def handle_join_session(data):
     """Join a live attendance session room."""
+    if not isinstance(data, dict):
+        logger.debug('Invalid join_session data: expected dict')
+        return
     session_id = data.get('session_id')
-    if session_id:
+    if isinstance(session_id, int) and session_id > 0:
         join_room(f'session_{session_id}')
-        logger.debug(f'Client joined session room: {session_id}')
+        logger.debug('Client joined session room: %s', session_id)
 
 
 @socketio.on('leave_session')
 def handle_leave_session(data):
     """Leave a session room."""
+    if not isinstance(data, dict):
+        return
     session_id = data.get('session_id')
-    if session_id:
+    if isinstance(session_id, int) and session_id > 0:
         leave_room(f'session_{session_id}')
 
 

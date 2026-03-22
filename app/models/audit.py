@@ -21,6 +21,14 @@ class AuditLog(db.Model):
     # Relationship
     user = db.relationship('User', backref='audit_logs')
 
+    def _parse_details(self):
+        if not self.details:
+            return None
+        try:
+            return json.loads(self.details)
+        except (json.JSONDecodeError, TypeError):
+            return self.details
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -29,7 +37,7 @@ class AuditLog(db.Model):
             'action': self.action,
             'entity_type': self.entity_type,
             'entity_id': self.entity_id,
-            'details': json.loads(self.details) if self.details else None,
+            'details': self._parse_details(),
             'ip_address': self.ip_address,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }

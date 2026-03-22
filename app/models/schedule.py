@@ -30,7 +30,11 @@ class Schedule(db.Model):
         """Parse days_of_week string to list of ints."""
         if not self.days_of_week:
             return []
-        return [int(d) for d in self.days_of_week.split(',') if d.strip()]
+        try:
+            days = [int(d) for d in self.days_of_week.split(',') if d.strip()]
+            return [d for d in days if 0 <= d <= 6]
+        except (ValueError, TypeError):
+            return []
 
     @days_list.setter
     def days_list(self, value):

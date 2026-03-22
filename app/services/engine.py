@@ -8,6 +8,7 @@ from app.services.hardware import get_hardware_profile
 logger = logging.getLogger(__name__)
 
 _engine: FaceEngine | None = None
+_engine_lock = threading.Lock()
 _listener_started = False
 _local_version: int = 0
 
@@ -16,16 +17,18 @@ def get_face_engine() -> FaceEngine:
     """Get or create the face engine singleton."""
     global _engine
     if _engine is None:
-        from flask import current_app
-        profile = get_hardware_profile()
-        hw_config = profile.optimal_config()
-        _engine = FaceEngine(
-            config=hw_config,
-            face_data_dir=current_app.config['FACE_DATA_DIR'],
-            model_name=current_app.config.get('FACE_MODEL', 'buffalo_l'),
-        )
-        _engine.load_all_encodings()
-        _start_invalidation_listener()
+        with _engine_lock:
+            if _engine is None:
+                from flask import current_app
+                profile = get_hardware_profile()
+                hw_config = profile.optimal_config()
+                _engine = FaceEngine(
+                    config=hw_config,
+                    face_data_dir=current_app.config['FACE_DATA_DIR'],
+                    model_name=current_app.config.get('FACE_MODEL', 'buffalo_l'),
+                )
+                _engine.load_all_encodings()
+                _start_invalidation_listener()
     return _engine
 
 
