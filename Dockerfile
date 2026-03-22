@@ -1,5 +1,6 @@
 # ─── Face Attendance System — Production Docker Build ───
-FROM python:3.12-slim AS builder
+# Pin to slim-bookworm for deterministic builds (avoid trixie breakage)
+FROM python:3.12-slim-bookworm AS builder
 
 WORKDIR /build
 
@@ -13,20 +14,18 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # ─── Runtime stage ───
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim-bookworm AS runtime
 
 WORKDIR /app
 
 # Runtime system deps only (no build tools)
-# Package names for Debian Bookworm (python:3.12-slim)
-# NOTE: libgdk-pixbuf was renamed from 2.0-0 to -2.0-0 in Bookworm
+# Pinned to bookworm — package names are stable here
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
     libgomp1 \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
-    libgdk-pixbuf-2.0-0 \
     libcairo2 \
     libpq5 \
     curl \
